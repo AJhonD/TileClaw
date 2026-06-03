@@ -35,7 +35,6 @@ func GetTileMapList() map[int]TileMap {
 	tml := make(map[int]TileMap)
 	var list = []string{"http://mt0.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",
 		"http://tile.openstreetmap.org/{z}/{x}/{y}.png",
-		"http://api.mapbox.com/v4/mapbox.satellite/{z}/{x}/{y}.png?access_token=pk.eyJ1IjoiYWVyb3Zpc2lvbmtlc3RyZWwiLCJhIjoiY2l5bDhzYTVqMDAxNDJ3bGp1ZHA2cmtiaCJ9.8o3pqTWKiOV8RhjNGFW0rg",
 		// "http://mt0.google.cn/vt/lyrs=s&hl=zh-CN&x=214130&y=114212&z=18",
 		"http://mt0.google.cn/vt/lyrs=y&hl=zh-CN&x={x}&y={y}&z={z}",
 		"http://mt0.google.cn/vt/lyrs=s&x={x}&y={y}&z={z}",
