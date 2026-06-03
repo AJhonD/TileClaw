@@ -46,8 +46,8 @@ func init() {
 
 }
 func usage() {
-	fmt.Fprintf(os.Stderr, `tiler version: tiler/v0.1.0
-Usage: tiler [-h] [-c filename]
+	fmt.Fprintf(os.Stderr, `TileClaw v0.2.0
+Usage: tileclaw [-h] [-c filename]
 `)
 	flag.PrintDefaults()
 }
@@ -64,8 +64,8 @@ func initConf(cfgFile string) {
 	if err != nil {
 		log.Warnf("read config file(%s) error, details: %s", viper.ConfigFileUsed(), err)
 	}
-	viper.SetDefault("app.version", "v 0.1.0")
-	viper.SetDefault("app.title", "MapCloud Tiler")
+	viper.SetDefault("app.version", "v0.2.0")
+	viper.SetDefault("app.title", "TileClaw")
 	viper.SetDefault("output.format", "mbtiles")
 	viper.SetDefault("output.directory", "output")
 	viper.SetDefault("task.workers", 4)

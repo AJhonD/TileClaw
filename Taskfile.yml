@@ -1,7 +1,7 @@
 version: "3"
 
 vars:
-  APP: tiler
+  APP: tileclaw
   BUILD_DIR: build
 
 tasks:
@@ -21,7 +21,7 @@ tasks:
       GOARCH: "{{.GOARCH}}"
       CGO_ENABLED: "0"
     vars:
-      BIN: '{{if eq .GOOS "windows"}}tiler.exe{{else}}tiler{{end}}'
+      BIN: '{{if eq .GOOS "windows"}}tileclaw.exe{{else}}tileclaw{{end}}'
 
   build:linux:
     desc: 编译 Linux amd64
@@ -71,7 +71,7 @@ tasks:
       - cp conf.toml {{.BUILD_DIR}}/linux-amd64/
       - cp -r geojson {{.BUILD_DIR}}/linux-amd64/
       - cp start.sh stop.sh {{.BUILD_DIR}}/linux-amd64/
-      - chmod +x {{.BUILD_DIR}}/linux-amd64/tiler {{.BUILD_DIR}}/linux-amd64/start.sh {{.BUILD_DIR}}/linux-amd64/stop.sh
+      - chmod +x {{.BUILD_DIR}}/linux-amd64/tileclaw {{.BUILD_DIR}}/linux-amd64/start.sh {{.BUILD_DIR}}/linux-amd64/stop.sh
       - mkdir -p {{.BUILD_DIR}}/linux-amd64/output
 
   package:linux-arm:
@@ -81,7 +81,7 @@ tasks:
       - cp conf.toml {{.BUILD_DIR}}/linux-arm64/
       - cp -r geojson {{.BUILD_DIR}}/linux-arm64/
       - cp start.sh stop.sh {{.BUILD_DIR}}/linux-arm64/
-      - chmod +x {{.BUILD_DIR}}/linux-arm64/tiler {{.BUILD_DIR}}/linux-arm64/start.sh {{.BUILD_DIR}}/linux-arm64/stop.sh
+      - chmod +x {{.BUILD_DIR}}/linux-arm64/tileclaw {{.BUILD_DIR}}/linux-arm64/start.sh {{.BUILD_DIR}}/linux-arm64/stop.sh
       - mkdir -p {{.BUILD_DIR}}/linux-arm64/output
 
   package:windows:
@@ -100,7 +100,7 @@ tasks:
       - cp conf.toml {{.BUILD_DIR}}/darwin-amd64/
       - cp -r geojson {{.BUILD_DIR}}/darwin-amd64/
       - cp start.sh stop.sh {{.BUILD_DIR}}/darwin-amd64/
-      - chmod +x {{.BUILD_DIR}}/darwin-amd64/tiler {{.BUILD_DIR}}/darwin-amd64/start.sh {{.BUILD_DIR}}/darwin-amd64/stop.sh
+      - chmod +x {{.BUILD_DIR}}/darwin-amd64/tileclaw {{.BUILD_DIR}}/darwin-amd64/start.sh {{.BUILD_DIR}}/darwin-amd64/stop.sh
       - mkdir -p {{.BUILD_DIR}}/darwin-amd64/output
 
   package:mac-arm:
@@ -110,7 +110,7 @@ tasks:
       - cp conf.toml {{.BUILD_DIR}}/darwin-arm64/
       - cp -r geojson {{.BUILD_DIR}}/darwin-arm64/
       - cp start.sh stop.sh {{.BUILD_DIR}}/darwin-arm64/
-      - chmod +x {{.BUILD_DIR}}/darwin-arm64/tiler {{.BUILD_DIR}}/darwin-arm64/start.sh {{.BUILD_DIR}}/darwin-arm64/stop.sh
+      - chmod +x {{.BUILD_DIR}}/darwin-arm64/tileclaw {{.BUILD_DIR}}/darwin-arm64/start.sh {{.BUILD_DIR}}/darwin-arm64/stop.sh
       - mkdir -p {{.BUILD_DIR}}/darwin-arm64/output
 
   # ========== 其他 ==========
@@ -123,4 +123,4 @@ tasks:
     desc: 本地编译并运行
     deps: [build:windows]
     cmds:
-      - ./{{.BUILD_DIR}}/windows-amd64/tiler.exe -c conf.toml
+      - ./{{.BUILD_DIR}}/windows-amd64/tileclaw.exe -c conf.toml

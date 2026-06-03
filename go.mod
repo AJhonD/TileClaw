@@ -1,4 +1,4 @@
-module tiler
+module tileclaw
 
 go 1.25.0
 

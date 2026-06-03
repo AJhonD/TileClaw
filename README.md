@@ -1,60 +1,197 @@
+# TileClaw - 地图瓦片下载器
 
-# 地图下载器 Tiler - map tiles downloader
+> 一个极速地图瓦片下载工具，支持高德、谷歌、天地图、Mapbox、OSM 等主流地图服务。
 
-A well-polished tile downloader
+[![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go)](https://go.dev/)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-一个极速地图下载框架，支持谷歌、百度、高德、天地图、Mapbox、OSM、四维、易图通等。
+## 特性
 
-- 支持多任务多线程配置，可任意设置
+- **多源支持** — 兼容高德、谷歌、天地图、Mapbox、OSM、百度等瓦片服务
+- **精准下载** — 支持 GeoJSON 轮廓范围过滤，只下载指定区域
+- **多层级并发** — 多个缩放层级同时下载，充分利用带宽
+- **断点续传** — 异常退出后重启自动跳过已下载瓦片
+- **双存储模式** — 支持 MBTiles 数据库和目录文件两种输出
+- **矢量瓦片** — 支持 PBF 矢量瓦片下载
+- **跨平台编译** — 纯 Go 实现，CGO 禁用，一条命令交叉编译
+- **请求重试** — 自动重试 + 指数退避，应对网络波动
 
-- 支持不同层级设置不同下载范围，以加速下载
+## 快速开始
 
-- 支持轮廓精准下载，支持轮廓裁剪
+### 编译
 
-- 支持矢量瓦片数据下载
+```bash
+# 安装 go-task 后，一键打包
+task package:linux    # Linux amd64
+task package:windows  # Windows amd64
+task package:mac-arm  # macOS arm64
 
-- 支持文件和MBTILES两种存储方式
+# 或直接编译
+go build -trimpath -ldflags="-s -w" -o tileclaw .
+```
 
-- 支持自定义瓦片地址
+### 配置
 
-## 使用方式
+编辑 `conf.toml`：
 
-1. 下载源代码在对应的平台上自己编译
+```toml
+[task]
+    workers = 2        # 并发下载线程数
+    timedelay = 100    # 请求间隔 (ms)
 
-2. 直接release发布页面, 下载对应平台的预编译程序
+[output]
+    format = "mbtiles"
+    directory = "output"
 
-参照配置文件中的示例url更改为想要下载的地图地址，即可启动下载任务~
-> 例如: url = "http://mt0.google.com/vt/lyrs=s&x={x}&y={y}&z={z}" ,地址中瓦片的xyz使用{x}{y}{z}代替，其他保持不变。
+[tm]
+    name = "高德卫星图"
+    min = 0
+    max = 15
+    format = "jpg"
+    schema = "xyz"
+    url = "http://webst01.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}"
 
-## 谷歌地图说明
-- 影像层
-  谷歌影像，分有偏移和无偏移两种，下载国内有偏移的影像需要在连接中加地区字段，如下为大陆地区偏移影像
-  > url = "http://mt0.google.com/vt/lyrs=s&gl=CN&x={x}&y={y}&z={z}"
-- 标注层
-  影像标注，中文标注只有火星坐标，谷歌并不提供无偏移标注图层，所以通常只能下载有偏移的标注层，如下为大陆地区偏移标注
-  > url = "http://mt0.google.com/vt/lyrs=h&gl=CN&x={x}&y={y}&z={z}"
-- 使用
-  在实际的使用中，要么保持系统的无偏移（这个时候需要校准有偏移的标注层），要么保持影像和标注的都有偏移，使用火星算法处理自己的数据
+[[lrs]]
+    min = 0
+    max = 15
+    geojson = "./geojson/china.geojson"
+```
 
-#### 谷歌图层类型lyrs=
-- h 街道图，透明街道+标注
-- m 街道图
-- p 街道图
-- r 街道图
-- s 影像无标注
-- t 地形图
-- y 影像含标注
+### 运行
 
+```bash
+./tileclaw -c conf.toml
 
-## 天地图说明
-- 天地图影像,img_w
-  > url = "https://t0.tianditu.gov.cn/DataServer?T=img_w&x={x}&y={y}&l={z}&tk=75f0434f240669f4a2df6359275146d2"
-- 影像标注层,cia_w
-  > url = "https://t0.tianditu.gov.cn/DataServer?T=cia_w&x={x}&y={y}&l={z}&tk=75f0434f240669f4a2df6359275146d2"
+# 后台运行
+nohup ./tileclaw -c conf.toml > tileclaw.log 2>&1 &
+```
 
-- 天地图矢量(地形图),vec_w
-  > url = "https://t0.tianditu.gov.cn/DataServer?T=vec_w&x={x}&y={y}&l={z}&tk=75f0434f240669f4a2df6359275146d2"
-- 矢量标注层,cva_w
-  > url = "https://t0.tianditu.gov.cn/DataServer?T=cva_w&x={x}&y={y}&l={z}&tk=75f0434f240669f4a2df6359275146d2"
+## 地图 URL 参考
 
-> 工具已经处理了天地图429限制，请合理使用！！！
+### 高德地图
+
+瓦片格式：`jpg`，坐标系：火星坐标 (GCJ-02)，无需 API Key。
+
+| 图层 | 类型 | URL |
+|------|------|-----|
+| 卫星图 | `jpg` | `http://webst01.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}` |
+| 电子地图 | `png` | `http://webrd01.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}` |
+
+> **说明**
+> - `style=6`：卫星影像，不含地名标注
+> - `style=8`：标准街道图，含地名/路名/POI，有白色底图，**不能叠加到卫星图上**
+> - 高德没有透明标注层，如需卫星图 + 标注叠加请使用天地图
+> - `webst01` 可换为 `webst02` ~ `webst04` 分散请求
+> - `webrd01` 可换为 `webrd02` ~ `webrd04` 分散请求
+
+### 谷歌地图
+
+瓦片格式：`jpg`/`png`，坐标系：默认 WGS-84，`gl=CN` 时使用火星坐标。
+
+| 图层 | 类型 | URL |
+|------|------|-----|
+| 卫星图 | `jpg` | `http://mt0.google.com/vt/lyrs=s&x={x}&y={y}&z={z}` |
+| 影像含标注 | `jpg` | `http://mt0.google.com/vt/lyrs=y&x={x}&y={y}&z={z}` |
+| 透明街道标注 | `png` | `http://mt0.google.com/vt/lyrs=h&x={x}&y={y}&z={z}` |
+| 街道图 | `png` | `http://mt0.google.com/vt/lyrs=m&x={x}&y={y}&z={z}` |
+| 地形图 | `jpg` | `http://mt0.google.com/vt/lyrs=t&x={x}&y={y}&z={z}` |
+| 街道图 (含标注) | `png` | `http://mt0.google.com/vt/lyrs=r&x={x}&y={y}&z={z}` |
+
+> **说明**
+> - 国内访问需科学上网
+> - 下载国内区域加 `&gl=CN` 可获得火星坐标偏移数据
+> - `mt0` 可换为 `mt1` ~ `mt3` 分散请求
+> - `lyrs=h` 是透明标注层，可叠加到 `lyrs=s` 卫星图上
+
+### 天地图
+
+瓦片格式：`jpg`/`png`，坐标系：火星坐标 (GCJ-02)，**需注册获取 tk**（[注册地址](https://console.tianditu.gov.cn/)）。
+
+| 图层 | 类型 | URL |
+|------|------|-----|
+| 卫星影像 `img_w` | `jpg` | `https://t0.tianditu.gov.cn/DataServer?T=img_w&x={x}&y={y}&l={z}&tk=你的key` |
+| 影像标注 `cia_w` | `png` | `https://t0.tianditu.gov.cn/DataServer?T=cia_w&x={x}&y={y}&l={z}&tk=你的key` |
+| 矢量底图 `vec_w` | `png` | `https://t0.tianditu.gov.cn/DataServer?T=vec_w&x={x}&y={y}&l={z}&tk=你的key` |
+| 矢量标注 `cva_w` | `png` | `https://t0.tianditu.gov.cn/DataServer?T=cva_w&x={x}&y={y}&l={z}&tk=你的key` |
+
+> **说明**
+> - `cia_w` 和 `cva_w` 是透明标注层，可叠加到 `img_w` / `vec_w` 上
+> - 天地图有 429 限速，工具已内置重试 + 间隔控制
+> - `t0` 可换为 `t1` ~ `t6` 分散请求
+> - 请合理使用，不要高频大量下载
+
+### Mapbox
+
+瓦片格式：`jpg`/`png`/`pbf`，坐标系：WGS-84，**需注册获取 access_token**（[注册地址](https://account.mapbox.com/)）。
+
+| 图层 | 类型 | URL |
+|------|------|-----|
+| 卫星图 | `jpg` | `https://api.mapbox.com/v4/mapbox.satellite/{z}/{x}/{y}.jpg?access_token=你的token` |
+| 街道图 | `png` | `https://api.mapbox.com/v4/mapbox.streets/{z}/{x}/{y}.png?access_token=你的token` |
+| 浅色风格 | `png` | `https://api.mapbox.com/v4/mapbox.light/{z}/{x}/{y}.png?access_token=你的token` |
+| 深色风格 | `png` | `https://api.mapbox.com/v4/mapbox.dark/{z}/{x}/{y}.png?access_token=你的token` |
+| 地形图 | `png` | `https://api.mapbox.com/v4/mapbox.mapbox-terrain-v2/{z}/{x}/{y}.png?access_token=你的token` |
+
+> **说明**
+> - Mapbox 免费额度每月 50,000 次请求，大规模下载需注意配额
+> - 矢量瓦片（PBF）需使用 Mapbox Vector Tiles API，格式不同于栅格瓦片
+> - `schema` 设为 `xyz`，Mapbox 使用标准 XYZ 编号
+
+### OpenStreetMap
+
+瓦片格式：`png`，坐标系：WGS-84，无需 API Key。
+
+| 图层 | 类型 | URL |
+|------|------|-----|
+| 标准地图 | `png` | `https://tile.openstreetmap.org/{z}/{x}/{y}.png` |
+| 人道主义风格 | `png` | `https://a.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png` |
+
+> **说明**
+> - OSM 瓦片服务有严格的[使用策略](https://operations.osmfoundation.org/policies/tiles/)，禁止大量下载
+> - 推荐仅下载小范围区域，或使用其他 OSM 镜像源
+> - `tile.openstreetmap.org` 单点服务器，无 CDN，不建议大规模使用
+
+### 百度地图
+
+瓦片格式：`jpg`/`png`，坐标系：百度坐标 (BD-09)，无需 API Key。
+
+| 图层 | 类型 | URL |
+|------|------|-----|
+| 卫星图 | `jpg` | `http://shangetu0.map.bdimg.com/it/u=x={x};y={y};z={z};v=009;type=sate&fm=46` |
+| 电子地图 | `png` | `http://online1.map.bdimg.com/onlinelabel/?qt=tile&x={x}&y={y}&z={z}&styles=pl` |
+
+> **说明**
+> - **百度使用 BD-09 坐标系和自定义瓦片编号方案**，与标准 XYZ/TMS 不兼容
+> - 以上 URL 模板仅作参考，直接使用可能无法对齐瓦片位置
+> - 如需下载百度地图，建议在处理端做坐标转换（BD-09 → WGS-84）
+> - 百度地图的瓦片行号从左上角开始，与 TMS 方案（左下角）不同
+
+### 坐标系说明
+
+| 坐标系 | 使用方 | 说明 |
+|--------|--------|------|
+| WGS-84 | Google(无偏移), OSM, Mapbox | 国际标准坐标系 |
+| GCJ-02 (火星坐标) | 高德, 天地图, Google(`gl=CN`) | 国测局加密坐标系 |
+| BD-09 | 百度 | 百度在 GCJ-02 基础上二次加密 |
+
+> 不同坐标系的瓦片无法直接叠加使用，需注意对齐。
+
+## 与 Tileserver-GL 配合使用
+
+将生成的 `.mbtiles` 文件放入 tileserver-gl 的 `data/` 目录即可直接服务。
+
+## 致谢
+
+本项目基于 [atlasdatatech/tiler](https://github.com/atlasdatatech/tiler.git) 二次开发，感谢原作者的开源贡献。
+
+主要改进：
+- 数据库驱动切换为纯 Go 实现，支持 CGO 禁用交叉编译
+- HTTP 连接池复用 + 请求重试机制
+- 多图层并发下载，大幅提升下载速度
+- 断点续传，异常退出不丢失进度
+- 确定性输出路径，重启可继续
+- 完善的日志输出与 panic 恢复
+
+## License
+
+MIT
