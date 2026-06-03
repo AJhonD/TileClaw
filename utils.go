@@ -17,11 +17,36 @@ import (
 
 func saveToMBTile(tile Tile, db *sql.DB) error {
 	_, err := db.Exec("insert into tiles (zoom_level, tile_column, tile_row, tile_data) values (?, ?, ?, ?);", tile.T.Z, tile.T.X, tile.flipY(), tile.C)
-	// _, err := db.Exec("insert or ignore into tiles (zoom_level, tile_column, tile_row, tile_data) values (?, ?, ?, ?);", tile.T.Z, tile.T.X, tile.flipY(), tile.C)
 	if err != nil {
 		return err
 	}
 	return nil
+}
+
+func saveBatchToMBTile(tiles []Tile, db *sql.DB) {
+	tx, err := db.Begin()
+	if err != nil {
+		log.Errorf("batch tx begin error: %s", err)
+		return
+	}
+	stmt, err := tx.Prepare("insert or ignore into tiles (zoom_level, tile_column, tile_row, tile_data) values (?, ?, ?, ?)")
+	if err != nil {
+		log.Errorf("batch prepare error: %s", err)
+		tx.Rollback()
+		return
+	}
+	defer stmt.Close()
+	for _, tile := range tiles {
+		_, err := stmt.Exec(tile.T.Z, tile.T.X, tile.flipY(), tile.C)
+		if err != nil {
+			log.Warnf("batch save %v tile error: %s", tile.T, err)
+		}
+	}
+	err = tx.Commit()
+	if err != nil {
+		log.Errorf("batch commit error: %s", err)
+		tx.Rollback()
+	}
 }
 
 func saveToFiles(tile Tile, task *Task) error {
@@ -37,15 +62,7 @@ func saveToFiles(tile Tile, task *Task) error {
 }
 
 func optimizeConnection(db *sql.DB) error {
-	// _, err := db.Exec("PRAGMA synchronous=0")
-	// if err != nil {
-	// 	return err
-	// }
-	_, err := db.Exec("PRAGMA locking_mode=EXCLUSIVE")
-	if err != nil {
-		return err
-	}
-	_, err = db.Exec("PRAGMA journal_mode=DELETE")
+	_, err := db.Exec("PRAGMA busy_timeout=5000")
 	if err != nil {
 		return err
 	}
@@ -116,7 +133,12 @@ func loadFeatureCollection(path string) *geojson.FeatureCollection {
 	return fc
 }
 
+var collectionCache sync.Map
+
 func loadCollection(path string) orb.Collection {
+	if v, ok := collectionCache.Load(path); ok {
+		return v.(orb.Collection)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		log.Fatalf("unable to read file: %v", err)
@@ -132,6 +154,7 @@ func loadCollection(path string) orb.Collection {
 		collection = append(collection, f.Geometry)
 	}
 
+	collectionCache.Store(path, collection)
 	return collection
 }
 
@@ -180,4 +203,10 @@ func getZoomCount(g orb.Geometry, minz int, maxz int) map[int]int64 {
 		info[z] = tilecover.GeometryCount(g, maptile.Zoom(z))
 	}
 	return info
+}
+
+func getTileFilePath(task *Task, t maptile.Tile) string {
+	dir := filepath.Join(task.File, fmt.Sprintf(`%d`, t.Z), fmt.Sprintf(`%d`, t.X))
+	fileName := fmt.Sprintf(`%d.%s`, t.Y, task.TileMap.Format)
+	return filepath.Join(dir, fileName)
 }

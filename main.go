@@ -5,14 +5,15 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"time"
 
 	"github.com/shiena/ansicolor"
 	log "github.com/sirupsen/logrus"
 
 	nested "github.com/antonfisher/nested-logrus-formatter"
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/spf13/viper"
+	_ "modernc.org/sqlite"
 )
 
 // flag
@@ -34,8 +35,15 @@ func init() {
 		// FieldsOrder: []string{"component", "category"},
 	})
 	// then wrap the log output with it
-	log.SetOutput(ansicolor.NewAnsiColorWriter(os.Stdout))
-	log.SetLevel(log.DebugLevel)
+	// 日志同时输出到控制台和文件，便于程序异常退出后排查
+	logFile, err := os.OpenFile("app.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err == nil {
+		log.StandardLogger().SetOutput(logFile)
+	} else {
+		log.StandardLogger().SetOutput(ansicolor.NewAnsiColorWriter(os.Stdout))
+	}
+	log.SetLevel(log.WarnLevel)
+
 }
 func usage() {
 	fmt.Fprintf(os.Stderr, `tiler version: tiler/v0.1.0
@@ -93,7 +101,7 @@ func insertTiles(db *sql.Tx, tiles []TileData) error {
 
 func testDbTask() {
 
-	db, err := sql.Open("sqlite3", "./tiles.db")
+	db, err := sql.Open("sqlite", "./tiles.db")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -165,6 +173,14 @@ last:
 }
 
 func main() {
+
+	defer func() {
+		if r := recover(); r != nil {
+			log.Errorf("程序异常退出 (panic): %v\n堆栈信息:\n%s", r, debug.Stack())
+			os.Exit(1)
+		}
+	}()
+
 	flag.Parse()
 	if hf {
 		flag.Usage()

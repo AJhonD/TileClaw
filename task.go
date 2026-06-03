@@ -27,6 +27,18 @@ import (
 // MBTileVersion mbtiles版本号
 const MBTileVersion = "1.2"
 
+var httpClient = &http.Client{
+	Transport: &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 20,
+		IdleConnTimeout:     90 * time.Second,
+	},
+	Timeout: 30 * time.Second,
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
+
 // Task 下载任务
 type Task struct {
 	ID                 string
@@ -132,7 +144,9 @@ func (task *Task) MetaItems() map[string]string {
 		"center":      fmt.Sprintf(`%f,%f,%d`, c.X(), c.Y(), (task.Min+task.Max)/2),
 		"minzoom":     strconv.Itoa(task.Min),
 		"maxzoom":     strconv.Itoa(task.Max),
-		"json":        task.TileMap.JSON,
+	}
+	if task.TileMap.JSON != "" {
+		data["json"] = task.TileMap.JSON
 	}
 	return data
 }
@@ -143,10 +157,9 @@ func (task *Task) SetupMBTileTables() error {
 	if task.File == "" {
 		outdir := viper.GetString("output.directory")
 		os.MkdirAll(outdir, os.ModePerm)
-		task.File = filepath.Join(outdir, fmt.Sprintf("%s-z%d-%d.%s.mbtiles", task.Name, task.Min, task.Max, task.ID))
+		task.File = filepath.Join(outdir, fmt.Sprintf("%s.mbtiles", task.Name))
 	}
-	os.Remove(task.File)
-	db, err := sql.Open("sqlite3", task.File)
+	db, err := sql.Open("sqlite", task.File)
 	if err != nil {
 		return err
 	}
@@ -166,19 +179,19 @@ func (task *Task) SetupMBTileTables() error {
 		return err
 	}
 
-	_, err = db.Exec("create unique index name on metadata (name);")
+	_, err = db.Exec("create unique index if not exists name on metadata (name);")
 	if err != nil {
 		return err
 	}
 
-	_, err = db.Exec("create unique index tile_index on tiles(zoom_level, tile_column, tile_row);")
+	_, err = db.Exec("create unique index if not exists tile_index on tiles(zoom_level, tile_column, tile_row);")
 	if err != nil {
 		return err
 	}
 
 	// Load metadata.
 	for name, value := range task.MetaItems() {
-		_, err := db.Exec("insert into metadata (name, value) values (?, ?)", name, value)
+		_, err := db.Exec("insert or replace into metadata (name, value) values (?, ?)", name, value)
 		if err != nil {
 			return err
 		}
@@ -208,15 +221,16 @@ func (task *Task) playFun() {
 
 // SavePipe 保存瓦片管道
 func (task *Task) savePipe() {
+	batch := make([]Tile, 0, 200)
 	for tile := range task.savingpipe {
-		err := saveToMBTile(tile, task.db)
-		if err != nil {
-			if strings.HasPrefix(err.Error(), "UNIQUE constraint failed") {
-				log.Warnf("save %v tile to mbtiles db error ~ %s", tile.T, err)
-			} else {
-				log.Errorf("save %v tile to mbtiles db error ~ %s", tile.T, err)
-			}
+		batch = append(batch, tile)
+		if len(batch) >= 200 {
+			saveBatchToMBTile(batch, task.db)
+			batch = batch[:0]
 		}
+	}
+	if len(batch) > 0 {
+		saveBatchToMBTile(batch, task.db)
 	}
 }
 
@@ -238,6 +252,25 @@ func (task *Task) tileFetcher(mt maptile.Tile, url string) {
 		<-task.workers //workers完成并清退
 	}()
 
+	// 断点续传：跳过已下载的瓦片
+	if task.outformat != "mbtiles" {
+		path := getTileFilePath(task, mt)
+		if _, err := os.Stat(path); err == nil {
+			log.Debugf("skip existing tile (z:%d, x:%d, y:%d)", mt.Z, mt.X, mt.Y)
+			return
+		}
+	} else {
+		zpower := uint32(math.Pow(2.0, float64(mt.Z)))
+		flippedY := zpower - 1 - mt.Y
+		var count int
+		err := task.db.QueryRow("SELECT COUNT(*) FROM tiles WHERE zoom_level=? AND tile_column=? AND tile_row=?",
+			mt.Z, mt.X, flippedY).Scan(&count)
+		if err == nil && count > 0 {
+			log.Debugf("skip existing tile (z:%d, x:%d, y:%d)", mt.Z, mt.X, mt.Y)
+			return
+		}
+	}
+
 	prep := func(t maptile.Tile, url string) string {
 		url = strings.Replace(url, "{x}", strconv.Itoa(int(t.X)), -1)
 		url = strings.Replace(url, "{y}", strconv.Itoa(int(t.Y)), -1)
@@ -246,46 +279,69 @@ func (task *Task) tileFetcher(mt maptile.Tile, url string) {
 		url = strings.Replace(url, "{z}", strconv.Itoa(int(t.Z)), -1)
 		return url
 	}
-	tile := prep(mt, url)
-	client := &http.Client{
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			// 自定义重定向的行为
-			return http.ErrUseLastResponse // 使用最后一个响应
-		},
-	}
-	req, err := http.NewRequest("GET", tile, nil)
+	tileURL := prep(mt, url)
+
+	req, err := http.NewRequest("GET", tileURL, nil)
 	if err != nil {
-		fmt.Println("创建请求失败:", err)
+		log.Errorf("create request error: %s", err)
 		return
 	}
-
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 	req.Header.Set("Referer", "https://map.tianditu.gov.cn")
-	// req.Header.Set("Referer", "https://jiangsu.tianditu.gov.cn")
-	resp, err := client.Do(req)
-	if err != nil {
-		fmt.Println("发送请求失败:", err)
-		return
+
+	if task.timeDelay > 0 {
+		time.Sleep(time.Duration(task.timeDelay) * time.Millisecond)
 	}
-	defer resp.Body.Close()
-	// resp, err := http.Get(tile)
-	// if err != nil {
-	// 	log.Errorf("fetch :%s error, details: %s ~", tile, err)
-	// 	return
-	// }
-	// defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		log.Errorf("fetch %v tile error, status code: %d ~", tile, resp.StatusCode)
-		return
+
+	var body []byte
+	var statusCode int
+	minBodySize := 256
+	if task.TileMap.Format == PBF {
+		minBodySize = 1
 	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Errorf("read %v tile error ~ %s", mt, err)
+
+	for attempt := 0; attempt < 3; attempt++ {
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			log.Warnf("fetch %s attempt %d error: %s", tileURL, attempt+1, err)
+			time.Sleep(time.Duration(1<<uint(attempt)) * time.Second)
+			continue
+		}
+		statusCode = resp.StatusCode
+		if resp.StatusCode == 200 {
+			body, err = io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if err != nil {
+				log.Warnf("read %s attempt %d error: %s", tileURL, attempt+1, err)
+				time.Sleep(time.Duration(1<<uint(attempt)) * time.Second)
+				continue
+			}
+			if len(body) < minBodySize {
+				log.Warnf("tile %v too small (%d bytes), retry", mt, len(body))
+				time.Sleep(time.Duration(1<<uint(attempt)) * time.Second)
+				continue
+			}
+			break
+		}
+		resp.Body.Close()
+		if resp.StatusCode >= 500 || resp.StatusCode == 429 {
+			log.Warnf("fetch %s status %d attempt %d", tileURL, resp.StatusCode, attempt+1)
+			time.Sleep(time.Duration(1<<uint(attempt)) * time.Second)
+			continue
+		}
+		break // 4xx not retried
+	}
+	if statusCode != 200 || len(body) < minBodySize {
+		if statusCode == 200 && len(body) < minBodySize {
+			log.Errorf("tile %v too small after retries (%d bytes)", mt, len(body))
+		} else {
+			log.Errorf("fetch %v tile error, status code: %d ~", mt, statusCode)
+		}
 		return
 	}
 	if len(body) == 0 {
 		log.Warnf("nil tile %v ~", mt)
-		return //zero byte tiles n
+		return
 	}
 	// tiledata
 	td := Tile{
@@ -310,12 +366,11 @@ func (task *Task) tileFetcher(mt maptile.Tile, url string) {
 	if task.outformat == "mbtiles" {
 		task.savingpipe <- td
 	} else {
-		// task.wg.Add(1)
 		task.saveTile(td)
 	}
 
 	cost := time.Since(start).Milliseconds()
-	log.Infof("tile(z:%d, x:%d, y:%d), %dms , %.2f kb, %s ...\n", mt.Z, mt.X, mt.Y, cost, float32(len(body))/1024.0, tile)
+	log.Infof("tile(z:%d, x:%d, y:%d), %dms , %.2f kb, %s ...\n", mt.Z, mt.X, mt.Y, cost, float32(len(body))/1024.0, tileURL)
 }
 
 // DownloadZoom 下载指定层级
@@ -334,7 +389,6 @@ func (task *Task) downloadLayer(layer Layer) {
 		select {
 		case task.workers <- tile:
 			//设置请求发送间隔时间
-			time.Sleep(time.Duration(task.timeDelay) * time.Millisecond)
 			bar.Increment()
 			task.Bar.Increment()
 			task.tileWG.Add(1)
@@ -354,8 +408,7 @@ func (task *Task) downloadLayer(layer Layer) {
 		}
 	}
 	//等待该层结束
-	task.tileWG.Wait()
-	bar.FinishPrint(fmt.Sprintf("Task %s Zoom %d finished ~", task.ID, layer.Zoom))
+	bar.FinishPrint(fmt.Sprintf("Zoom %d dispatch finished ~", layer.Zoom))
 }
 
 // Download 开启下载任务
@@ -366,17 +419,30 @@ func (task *Task) Download() {
 	// task.Bar.Format("<.- >")
 	task.Bar.Start()
 	if task.outformat == "mbtiles" {
-		task.SetupMBTileTables()
+		if err := task.SetupMBTileTables(); err != nil {
+			log.Fatalf("init mbtiles error: %s", err)
+		}
 	} else {
 		if task.File == "" {
 			outdir := viper.GetString("output.directory")
-			task.File = filepath.Join(outdir, fmt.Sprintf("%s-z%d-%d.%s", task.Name, task.Min, task.Max, task.ID))
+			task.File = filepath.Join(outdir, task.Name)
 		}
 		os.MkdirAll(task.File, os.ModePerm)
 	}
 	go task.savePipe()
+	var dWg sync.WaitGroup
 	for _, layer := range task.Layers {
-		task.downloadLayer(layer)
+		dWg.Add(1)
+		go func(l Layer) {
+			defer dWg.Done()
+			task.downloadLayer(l)
+		}(layer)
+	}
+	dWg.Wait()
+	task.tileWG.Wait()
+	close(task.savingpipe)
+	if task.db != nil {
+		task.db.Close()
 	}
 	task.Bar.FinishPrint(fmt.Sprintf("Task %s finished ~", task.ID))
 }
