@@ -1,0 +1,22 @@
+[email]
+    # Enable email notifications.
+    enabled = false
+    # SMTP server.
+    smtp_host = "smtp.qq.com"
+    smtp_port = 587
+    # Sender email address.
+    username = ""
+    # SMTP authorization code. Prefer TILECLAW_EMAIL_PASSWORD instead of committing a value.
+    password = ""
+    # Recipient email address.
+    to = ""
+    # Task name used in email subjects.
+    task_name = "TileClaw Download"
+
+[alert]
+    # Error threshold for alert emails.
+    error_threshold = 50
+    # Cooldown time in minutes.
+    cooldown_minutes = 30
+    # Error counting window in minutes.
+    window_minutes = 10

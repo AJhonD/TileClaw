@@ -455,10 +455,14 @@ func (task *Task) Download() {
 		}
 	} else {
 		if task.File == "" {
-			outdir := viper.GetString("output.directory")
-			task.File = filepath.Join(outdir, task.Name)
+			outDir := viper.GetString("output.directory")
+			task.File = filepath.Join(outDir, task.Name)
 		}
-		os.MkdirAll(task.File, os.ModePerm)
+		err := os.MkdirAll(task.File, os.ModePerm)
+		if err != nil {
+			sysLog.Fatalf("create output directory error: %s", err)
+			return
+		}
 	}
 	go task.savePipe()
 

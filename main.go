@@ -60,7 +60,10 @@ func init() {
 	flag.Usage = usage
 }
 func usage() {
-	fmt.Fprintf(os.Stderr, `TileClaw v0.2.0 Usage: tileclaw [-h] [-c filename]`)
+	_, err := fmt.Fprintf(os.Stderr, `TileClaw v0.2.0 Usage: tileclaw [-h] [-c filename]`)
+	if err != nil {
+		sysLog.Errorf("write log file error: %s", err)
+	}
 	flag.PrintDefaults()
 }
 
@@ -248,6 +251,10 @@ func main() {
 		}
 	}
 	task := NewTask(layers, tm)
+	if task == nil {
+		sysLog.Warningf("The task is nil, stoped")
+		return
+	}
 	sysLog.Printf("start download map tilers, workerCount: {%d}\r\n", task.workerCount)
 	task.Download()
 	secs := time.Since(start).Seconds()

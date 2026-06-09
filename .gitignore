@@ -2,3 +2,5 @@ build
 .idea
 output
 *.log
+mail.toml
+*密钥*.txt

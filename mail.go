@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/smtp"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,9 +36,12 @@ func loadMailConfig() {
 	v := viper.New()
 	v.SetConfigFile("mail.toml")
 	v.SetConfigType("toml")
+	v.SetEnvPrefix("TILECLAW")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	v.AutomaticEnv()
+
 	if err := v.ReadInConfig(); err != nil {
-		sysLog.Warnf("read mail.toml failed: %s, email disabled", err)
-		return
+		sysLog.Warnf("read mail.toml failed: %s, using environment/default mail config", err)
 	}
 	mailCfg = mailConfig{
 		enabled:         v.GetBool("email.enabled"),
@@ -59,6 +63,10 @@ func loadMailConfig() {
 	}
 	if mailCfg.windowMinutes == 0 {
 		mailCfg.windowMinutes = 10
+	}
+	if mailCfg.enabled && (mailCfg.host == "" || mailCfg.port == 0 || mailCfg.username == "" || mailCfg.password == "" || mailCfg.to == "") {
+		sysLog.Warnf("email enabled but mail config is incomplete, email disabled")
+		mailCfg.enabled = false
 	}
 	windowStart = time.Now()
 	sysLog.Infof("mail config loaded, enabled=%v, to=%s", mailCfg.enabled, mailCfg.to)
