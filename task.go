@@ -449,6 +449,7 @@ func (task *Task) Download() {
 	downloadStart := time.Now()
 	task.Bar = pb.New64(task.Total).Prefix("Task : ").Postfix("\n")
 	task.Bar.Start()
+	// 不用的格式创建存储介质
 	if task.outformat == "mbtiles" {
 		if err := task.SetupMBTileTables(); err != nil {
 			sysLog.Fatalf("init mbtiles error: %s", err)
@@ -464,48 +465,19 @@ func (task *Task) Download() {
 			return
 		}
 	}
+	// 保存管道
 	go task.savePipe()
 
 	// 定期进度日志，30s 一条，方便后台运行时查看
 	done := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-		start := time.Now()
-		prevCurrent := int64(0)
-		prevTime := start
-		for {
-			select {
-			case <-ticker.C:
-				now := time.Now()
-				current := atomic.LoadInt64(&task.Current)
-				elapsed := now.Sub(start).Truncate(time.Second)
-				pct := float64(current) / float64(task.Total) * 100
-				var eta string
-				interval := now.Sub(prevTime).Seconds()
-				delta := current - prevCurrent
-				if delta > 0 && interval > 0 {
-					rate := float64(delta) / interval
-					remaining := time.Duration(float64(task.Total-current)/rate) * time.Second
-					eta = remaining.Truncate(time.Second).String()
-				} else {
-					eta = "-"
-				}
-				sysLog.Infof("Progress: %d / %d (%.2f%%), elapsed %s, ETA %s", current, task.Total, pct, elapsed, eta)
-				prevCurrent = current
-				prevTime = now
-			case <-done:
-				return
-			}
-		}
-	}()
+	go task.timingPrintingProgress(done)
 
 	var dWg sync.WaitGroup
 	for _, layer := range task.Layers {
 		dWg.Add(1)
-		go func(l Layer) {
+		go func(layer Layer) {
 			defer dWg.Done()
-			task.downloadLayer(l)
+			task.downloadLayer(layer)
 		}(layer)
 	}
 	dWg.Wait()
@@ -513,10 +485,51 @@ func (task *Task) Download() {
 	close(done)
 	close(task.savingpipe)
 	if task.db != nil {
-		task.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
-		task.db.Close()
+		_, err := task.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+		if err != nil {
+			sysLog.Errorf("wal checkpoint 失败: %v", err)
+		}
+		// 2. 关闭数据库（必须拿 error）
+		err = task.db.Close()
+		if err != nil {
+			sysLog.Errorf("关闭数据库失败: %v", err)
+		}
+		task.db = nil
 	}
 	task.Bar.FinishPrint(fmt.Sprintf("Task %s finished ~", task.ID))
 	elapsed := time.Since(downloadStart)
 	notifyComplete(task.Current, task.Total, elapsed)
+}
+
+// 定时进度打印
+func (task *Task) timingPrintingProgress(done chan struct{}) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	start := time.Now()
+	prevCurrent := int64(0)
+	prevTime := start
+	for {
+		select {
+		case <-ticker.C:
+			now := time.Now()
+			current := atomic.LoadInt64(&task.Current)
+			elapsed := now.Sub(start).Truncate(time.Second)
+			pct := float64(current) / float64(task.Total) * 100
+			var eta string
+			interval := now.Sub(prevTime).Seconds()
+			delta := current - prevCurrent
+			if delta > 0 && interval > 0 {
+				rate := float64(delta) / interval
+				remaining := time.Duration(float64(task.Total-current)/rate) * time.Second
+				eta = remaining.Truncate(time.Second).String()
+			} else {
+				eta = "-"
+			}
+			sysLog.Infof("Progress: %d / %d (%.2f%%), elapsed %s, ETA %s", current, task.Total, pct, elapsed, eta)
+			prevCurrent = current
+			prevTime = now
+		case <-done:
+			return
+		}
+	}
 }
