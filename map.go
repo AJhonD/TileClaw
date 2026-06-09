@@ -20,7 +20,8 @@ type TileMap struct {
 	JSON        string
 	URL         string
 	Token       string
-	//such as porxy...
+	CenterLon   float64
+	CenterLat   float64
 }
 
 // CreateTileMap 添加地图

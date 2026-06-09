@@ -4,65 +4,77 @@ import (
 	"database/sql"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"runtime/debug"
 	"time"
 
-	"github.com/shiena/ansicolor"
 	log "github.com/sirupsen/logrus"
 
 	nested "github.com/antonfisher/nested-logrus-formatter"
+	"github.com/shiena/ansicolor"
 	"github.com/spf13/viper"
 	_ "modernc.org/sqlite"
 )
 
-// flag
 var (
-	hf bool
-	cf string
+	hf       bool
+	cf       string
+	testMail bool
+	sysLog   = log.New()
+	progLog  = log.New()
 )
+
+func initLogging() {
+	formatter := &nested.Formatter{
+		HideKeys:        true,
+		ShowFullLevel:   true,
+		TimestampFormat: "2006-01-02 15:04:05.000",
+	}
+
+	// 系统日志 → tileclaw.log + stdout
+	sysLog.SetFormatter(formatter)
+	sysLog.SetLevel(log.InfoLevel)
+	sysFile, err := os.OpenFile("tileclaw.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err == nil {
+		sysLog.SetOutput(io.MultiWriter(ansicolor.NewAnsiColorWriter(os.Stdout), sysFile))
+	} else {
+		sysLog.SetOutput(ansicolor.NewAnsiColorWriter(os.Stdout))
+	}
+
+	// 进度日志 → download.log + stdout (无颜色，量大)
+	progLog.SetFormatter(formatter)
+	progLog.SetLevel(log.InfoLevel)
+	progFile, err := os.OpenFile("download.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err == nil {
+		progLog.SetOutput(io.MultiWriter(os.Stdout, progFile))
+	} else {
+		progLog.SetOutput(os.Stdout)
+	}
+}
 
 func init() {
 	flag.BoolVar(&hf, "h", false, "this help")
 	flag.StringVar(&cf, "c", "conf.toml", "set config `file`")
-	// 改变默认的 Usage，flag包中的Usage 其实是一个函数类型。这里是覆盖默认函数实现，具体见后面Usage部分的分析
+	flag.BoolVar(&testMail, "test-mail", false, "send a test email and exit")
 	flag.Usage = usage
-	//InitLog 初始化日志
-	log.SetFormatter(&nested.Formatter{
-		HideKeys:        true,
-		ShowFullLevel:   true,
-		TimestampFormat: "2006-01-02 15:04:05.000",
-		// FieldsOrder: []string{"component", "category"},
-	})
-	// then wrap the log output with it
-	// 日志同时输出到控制台和文件，便于程序异常退出后排查
-	logFile, err := os.OpenFile("app.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	if err == nil {
-		log.StandardLogger().SetOutput(logFile)
-	} else {
-		log.StandardLogger().SetOutput(ansicolor.NewAnsiColorWriter(os.Stdout))
-	}
-	log.SetLevel(log.WarnLevel)
-
 }
 func usage() {
-	fmt.Fprintf(os.Stderr, `TileClaw v0.2.0
-Usage: tileclaw [-h] [-c filename]
-`)
+	fmt.Fprintf(os.Stderr, `TileClaw v0.2.0 Usage: tileclaw [-h] [-c filename]`)
 	flag.PrintDefaults()
 }
 
 // initConf 初始化配置
 func initConf(cfgFile string) {
 	if _, err := os.Stat(cfgFile); os.IsNotExist(err) {
-		log.Warnf("config file(%s) not exist", cfgFile)
+		sysLog.Warnf("config file(%s) not exist", cfgFile)
 	}
 	viper.SetConfigType("toml")
 	viper.SetConfigFile(cfgFile)
 	viper.AutomaticEnv() // read in environment variables that match
 	err := viper.ReadInConfig()
 	if err != nil {
-		log.Warnf("read config file(%s) error, details: %s", viper.ConfigFileUsed(), err)
+		sysLog.Warnf("read config file(%s) error, details: %s", viper.ConfigFileUsed(), err)
 	}
 	viper.SetDefault("app.version", "v0.2.0")
 	viper.SetDefault("app.title", "TileClaw")
@@ -103,7 +115,7 @@ func testDbTask() {
 
 	db, err := sql.Open("sqlite", "./tiles.db")
 	if err != nil {
-		log.Fatal(err)
+		sysLog.Fatal(err)
 	}
 	defer db.Close()
 
@@ -117,13 +129,13 @@ func testDbTask() {
 
 	_, err = db.Exec(createTableSQL)
 	if err != nil {
-		log.Fatal(err)
+		sysLog.Fatal(err)
 	}
 
 	// 开始事务
 	tx, err := db.Begin()
 	if err != nil {
-		log.Fatal(err)
+		sysLog.Fatal(err)
 	}
 	defer tx.Rollback() // 如果提交事务前发生错误，则回滚事务
 
@@ -135,8 +147,8 @@ func testDbTask() {
 	for z := 0; z <= 12; z++ {
 		numTiles := 1 << uint(z) // 计算每个缩放级别的瓦片数量
 		total += numTiles * numTiles
-		log.Printf("级别%d,瓦片数量：%d\n", z, numTiles*numTiles)
-		log.Printf("总瓦片数量：%d\n", total)
+		sysLog.Printf("级别%d,瓦片数量：%d\n", z, numTiles*numTiles)
+		sysLog.Printf("总瓦片数量：%d\n", total)
 		for x := 0; x < numTiles; x++ {
 			for y := 0; y < numTiles; y++ {
 				tile := TileData{Z: z, X: x, Y: y, Flag: false}
@@ -145,7 +157,7 @@ func testDbTask() {
 				if len(tileBatch) >= batchSize {
 					err := insertTiles(tx, tileBatch) // 使用事务执行批量插入操作
 					if err != nil {
-						log.Fatal(err)
+						sysLog.Fatal(err)
 					}
 					tileBatch = nil // 清空批次
 				}
@@ -162,13 +174,13 @@ last:
 	if len(tileBatch) > 0 {
 		err := insertTiles(tx, tileBatch) // 使用事务执行批量插入操作
 		if err != nil {
-			log.Fatal(err)
+			sysLog.Fatal(err)
 		}
 	}
 	// 提交事务
 	err = tx.Commit()
 	if err != nil {
-		log.Fatal(err)
+		sysLog.Fatal(err)
 	}
 }
 
@@ -176,7 +188,8 @@ func main() {
 
 	defer func() {
 		if r := recover(); r != nil {
-			log.Errorf("程序异常退出 (panic): %v\n堆栈信息:\n%s", r, debug.Stack())
+			sysLog.Errorf("程序异常退出 (panic): %v\n堆栈信息:\n%s", r, debug.Stack())
+			notifyPanic(fmt.Sprintf("%v", r))
 			os.Exit(1)
 		}
 	}()
@@ -190,16 +203,26 @@ func main() {
 	if cf == "" {
 		cf = "conf.toml"
 	}
+	initLogging()
 	initConf(cf)
+	loadMailConfig()
+
+	if testMail {
+		sendMail("[TileClaw] Test Email", "This is a test email from TileClaw.\n\nIf you see this, your mail config is working correctly.\n\n-- TileClaw")
+		sysLog.Println("test email sent, check your inbox")
+		return
+	}
 	start := time.Now()
 	tm := TileMap{
-		Name:   viper.GetString("tm.name"),
-		Min:    viper.GetInt("tm.min"),
-		Max:    viper.GetInt("tm.max"),
-		Format: viper.GetString("tm.format"),
-		Schema: viper.GetString("tm.schema"),
-		JSON:   viper.GetString("tm.json"),
-		URL:    viper.GetString("tm.url"),
+		Name:      viper.GetString("tm.name"),
+		Min:       viper.GetInt("tm.min"),
+		Max:       viper.GetInt("tm.max"),
+		Format:    viper.GetString("tm.format"),
+		Schema:    viper.GetString("tm.schema"),
+		JSON:      viper.GetString("tm.json"),
+		URL:       viper.GetString("tm.url"),
+		CenterLon: viper.GetFloat64("tm.center_lon"),
+		CenterLat: viper.GetFloat64("tm.center_lat"),
 	}
 	type cfgLayer struct {
 		Min     int
@@ -210,7 +233,7 @@ func main() {
 	var cfgLrs []cfgLayer
 	err := viper.UnmarshalKey("lrs", &cfgLrs)
 	if err != nil {
-		log.Fatal("lrs配置错误")
+		sysLog.Fatal("lrs配置错误")
 	}
 	var layers []Layer
 	for _, lrs := range cfgLrs {
@@ -225,8 +248,8 @@ func main() {
 		}
 	}
 	task := NewTask(layers, tm)
-	fmt.Println(task.workerCount)
+	sysLog.Printf("start download map tilers, workerCount: {%d}\r\n", task.workerCount)
 	task.Download()
 	secs := time.Since(start).Seconds()
-	log.Printf("\n%.3fs finished...", secs)
+	sysLog.Printf("\n%.3fs finished...", secs)
 }

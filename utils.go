@@ -12,7 +12,6 @@ import (
 	"github.com/paulmach/orb/geojson"
 	"github.com/paulmach/orb/maptile"
 	"github.com/paulmach/orb/maptile/tilecover"
-	log "github.com/sirupsen/logrus"
 )
 
 func saveToMBTile(tile Tile, db *sql.DB) error {
@@ -26,12 +25,12 @@ func saveToMBTile(tile Tile, db *sql.DB) error {
 func saveBatchToMBTile(tiles []Tile, db *sql.DB) {
 	tx, err := db.Begin()
 	if err != nil {
-		log.Errorf("batch tx begin error: %s", err)
+		sysLog.Errorf("batch tx begin error: %s", err)
 		return
 	}
 	stmt, err := tx.Prepare("insert or ignore into tiles (zoom_level, tile_column, tile_row, tile_data) values (?, ?, ?, ?)")
 	if err != nil {
-		log.Errorf("batch prepare error: %s", err)
+		sysLog.Errorf("batch prepare error: %s", err)
 		tx.Rollback()
 		return
 	}
@@ -39,12 +38,12 @@ func saveBatchToMBTile(tiles []Tile, db *sql.DB) {
 	for _, tile := range tiles {
 		_, err := stmt.Exec(tile.T.Z, tile.T.X, tile.flipY(), tile.C)
 		if err != nil {
-			log.Warnf("batch save %v tile error: %s", tile.T, err)
+			sysLog.Warnf("batch save %v tile error: %s", tile.T, err)
 		}
 	}
 	err = tx.Commit()
 	if err != nil {
-		log.Errorf("batch commit error: %s", err)
+		sysLog.Errorf("batch commit error: %s", err)
 		tx.Rollback()
 	}
 }
@@ -57,12 +56,16 @@ func saveToFiles(tile Tile, task *Task) error {
 	if err != nil {
 		return err
 	}
-	log.Println(fileName)
+	progLog.Println(fileName)
 	return nil
 }
 
 func optimizeConnection(db *sql.DB) error {
-	_, err := db.Exec("PRAGMA busy_timeout=5000")
+	_, err := db.Exec("PRAGMA journal_mode=WAL")
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec("PRAGMA busy_timeout=5000")
 	if err != nil {
 		return err
 	}
@@ -86,7 +89,7 @@ func optimizeDatabase(db *sql.DB) error {
 func loadFeature(path string) *geojson.Feature {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		log.Fatalf("unable to read file: %v", err)
+		sysLog.Fatalf("unable to read file: %v", err)
 	}
 
 	f, err := geojson.UnmarshalFeature(data)
@@ -97,14 +100,14 @@ func loadFeature(path string) *geojson.Feature {
 	fc, err := geojson.UnmarshalFeatureCollection(data)
 	if err == nil {
 		if len(fc.Features) != 1 {
-			log.Fatalf("must have 1 feature: %v", len(fc.Features))
+			sysLog.Fatalf("must have 1 feature: %v", len(fc.Features))
 		}
 		return fc.Features[0]
 	}
 
 	g, err := geojson.UnmarshalGeometry(data)
 	if err != nil {
-		log.Fatalf("unable to unmarshal feature: %v", err)
+		sysLog.Fatalf("unable to unmarshal feature: %v", err)
 	}
 
 	return geojson.NewFeature(g.Geometry())
@@ -113,12 +116,12 @@ func loadFeature(path string) *geojson.Feature {
 func loadFeatureCollection(path string) *geojson.FeatureCollection {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		log.Fatalf("unable to read file: %v", err)
+		sysLog.Fatalf("unable to read file: %v", err)
 	}
 
 	fc, err := geojson.UnmarshalFeatureCollection(data)
 	if err != nil {
-		log.Fatalf("unable to unmarshal feature: %v", err)
+		sysLog.Fatalf("unable to unmarshal feature: %v", err)
 	}
 
 	count := 0
@@ -141,12 +144,12 @@ func loadCollection(path string) orb.Collection {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		log.Fatalf("unable to read file: %v", err)
+		sysLog.Fatalf("unable to read file: %v", err)
 	}
 
 	fc, err := geojson.UnmarshalFeatureCollection(data)
 	if err != nil {
-		log.Fatalf("unable to unmarshal feature: %v", err)
+		sysLog.Fatalf("unable to unmarshal feature: %v", err)
 	}
 
 	var collection orb.Collection
@@ -173,12 +176,12 @@ func output(name string, r *geojson.FeatureCollection) {
 
 	data, err := json.MarshalIndent(r, "", " ")
 	if err != nil {
-		log.Fatalf("error marshalling json: %v", err)
+		sysLog.Fatalf("error marshalling json: %v", err)
 	}
 
 	err = os.WriteFile("failure_"+name+".geojson", data, 0644)
 	if err != nil {
-		log.Fatalf("write file failure: %v", err)
+		sysLog.Fatalf("write file failure: %v", err)
 	}
 }
 
@@ -187,12 +190,12 @@ func output2(name string, r *geojson.FeatureCollection, wg *sync.WaitGroup) {
 	defer wg.Done()
 	data, err := json.MarshalIndent(r, "", " ")
 	if err != nil {
-		log.Fatalf("error marshalling json: %v", err)
+		sysLog.Fatalf("error marshalling json: %v", err)
 	}
 
 	err = os.WriteFile(name+".geojson", data, 0644)
 	if err != nil {
-		log.Fatalf("write file failure: %v", err)
+		sysLog.Fatalf("write file failure: %v", err)
 	}
 }
 

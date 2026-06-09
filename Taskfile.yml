@@ -68,7 +68,7 @@ tasks:
     desc: 编译 + 打包 Linux amd64 → build/linux-amd64/
     deps: [build:linux]
     cmds:
-      - cp conf.toml {{.BUILD_DIR}}/linux-amd64/
+      - cp conf.toml mail.toml {{.BUILD_DIR}}/linux-amd64/
       - cp -r geojson {{.BUILD_DIR}}/linux-amd64/
       - cp start.sh stop.sh {{.BUILD_DIR}}/linux-amd64/
       - chmod +x {{.BUILD_DIR}}/linux-amd64/tileclaw {{.BUILD_DIR}}/linux-amd64/start.sh {{.BUILD_DIR}}/linux-amd64/stop.sh
@@ -78,7 +78,7 @@ tasks:
     desc: 编译 + 打包 Linux arm64 → build/linux-arm64/
     deps: [build:linux-arm]
     cmds:
-      - cp conf.toml {{.BUILD_DIR}}/linux-arm64/
+      - cp conf.toml mail.toml {{.BUILD_DIR}}/linux-arm64/
       - cp -r geojson {{.BUILD_DIR}}/linux-arm64/
       - cp start.sh stop.sh {{.BUILD_DIR}}/linux-arm64/
       - chmod +x {{.BUILD_DIR}}/linux-arm64/tileclaw {{.BUILD_DIR}}/linux-arm64/start.sh {{.BUILD_DIR}}/linux-arm64/stop.sh
@@ -88,7 +88,7 @@ tasks:
     desc: 编译 + 打包 Windows amd64 → build/windows-amd64/
     deps: [build:windows]
     cmds:
-      - cp conf.toml {{.BUILD_DIR}}/windows-amd64/
+      - cp conf.toml mail.toml {{.BUILD_DIR}}/windows-amd64/
       - cp -r geojson {{.BUILD_DIR}}/windows-amd64/
       - cp start.bat stop.bat {{.BUILD_DIR}}/windows-amd64/
       - mkdir {{.BUILD_DIR}}/windows-amd64/output
@@ -97,7 +97,7 @@ tasks:
     desc: 编译 + 打包 macOS amd64 → build/darwin-amd64/
     deps: [build:mac]
     cmds:
-      - cp conf.toml {{.BUILD_DIR}}/darwin-amd64/
+      - cp conf.toml mail.toml {{.BUILD_DIR}}/darwin-amd64/
       - cp -r geojson {{.BUILD_DIR}}/darwin-amd64/
       - cp start.sh stop.sh {{.BUILD_DIR}}/darwin-amd64/
       - chmod +x {{.BUILD_DIR}}/darwin-amd64/tileclaw {{.BUILD_DIR}}/darwin-amd64/start.sh {{.BUILD_DIR}}/darwin-amd64/stop.sh
@@ -107,7 +107,7 @@ tasks:
     desc: 编译 + 打包 macOS arm64 → build/darwin-arm64/
     deps: [build:mac-arm]
     cmds:
-      - cp conf.toml {{.BUILD_DIR}}/darwin-arm64/
+      - cp conf.toml mail.toml {{.BUILD_DIR}}/darwin-arm64/
       - cp -r geojson {{.BUILD_DIR}}/darwin-arm64/
       - cp start.sh stop.sh {{.BUILD_DIR}}/darwin-arm64/
       - chmod +x {{.BUILD_DIR}}/darwin-arm64/tileclaw {{.BUILD_DIR}}/darwin-arm64/start.sh {{.BUILD_DIR}}/darwin-arm64/stop.sh

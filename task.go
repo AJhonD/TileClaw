@@ -7,18 +7,20 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/paulmach/orb"
 	"github.com/paulmach/orb/maptile"
 	"github.com/paulmach/orb/maptile/tilecover"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/teris-io/shortid"
 	pb "gopkg.in/cheggaaa/pb.v1"
@@ -86,7 +88,7 @@ func NewTask(layers []Layer, m TileMap) *Task {
 			layers[i].URL = m.URL
 		}
 		layers[i].Count = tilecover.CollectionCount(layers[i].Collection, maptile.Zoom(layers[i].Zoom))
-		log.Printf("zoom: %d, tiles: %d \n", layers[i].Zoom, layers[i].Count)
+		sysLog.Printf("zoom: %d, tiles: %d \n", layers[i].Zoom, layers[i].Count)
 		task.Total += layers[i].Count
 	}
 	task.abort = make(chan struct{})
@@ -129,7 +131,15 @@ func (task *Task) Center() orb.Point {
 // MetaItems 输出
 func (task *Task) MetaItems() map[string]string {
 	b := task.Bound()
-	c := task.Center()
+	var cx, cy float64
+	if task.TileMap.CenterLon != 0 || task.TileMap.CenterLat != 0 {
+		cx = task.TileMap.CenterLon
+		cy = task.TileMap.CenterLat
+	} else {
+		c := task.Center()
+		cx = c.X()
+		cy = c.Y()
+	}
 	data := map[string]string{
 		"id":          task.ID,
 		"name":        task.Name,
@@ -141,7 +151,7 @@ func (task *Task) MetaItems() map[string]string {
 		"pixel_scale": strconv.Itoa(TileSize),
 		"version":     MBTileVersion,
 		"bounds":      fmt.Sprintf(`%f,%f,%f,%f`, b.Left(), b.Bottom(), b.Right(), b.Top()),
-		"center":      fmt.Sprintf(`%f,%f,%d`, c.X(), c.Y(), (task.Min+task.Max)/2),
+		"center":      fmt.Sprintf(`%f,%f,%d`, cx, cy, (task.Min+task.Max)/2),
 		"minzoom":     strconv.Itoa(task.Min),
 		"maxzoom":     strconv.Itoa(task.Max),
 	}
@@ -189,8 +199,18 @@ func (task *Task) SetupMBTileTables() error {
 		return err
 	}
 
-	// Load metadata.
-	for name, value := range task.MetaItems() {
+	// Load metadata, merging minzoom/maxzoom with existing values
+	items := task.MetaItems()
+	var oldMin, oldMax string
+	_ = db.QueryRow("SELECT value FROM metadata WHERE name='minzoom'").Scan(&oldMin)
+	_ = db.QueryRow("SELECT value FROM metadata WHERE name='maxzoom'").Scan(&oldMax)
+	if v, _ := strconv.Atoi(oldMin); v < task.Min {
+		items["minzoom"] = oldMin
+	}
+	if v, _ := strconv.Atoi(oldMax); v > task.Max {
+		items["maxzoom"] = oldMax
+	}
+	for name, value := range items {
 		_, err := db.Exec("insert or replace into metadata (name, value) values (?, ?)", name, value)
 		if err != nil {
 			return err
@@ -202,20 +222,14 @@ func (task *Task) SetupMBTileTables() error {
 }
 
 func (task *Task) abortFun() {
-	// os.Stdin.Read(make([]byte, 1)) // read a single byte
-	// <-time.After(8 * time.Second)
 	task.abort <- struct{}{}
 }
 
 func (task *Task) pauseFun() {
-	// os.Stdin.Read(make([]byte, 1)) // read a single byte
-	// <-time.After(3 * time.Second)
 	task.pause <- struct{}{}
 }
 
 func (task *Task) playFun() {
-	// os.Stdin.Read(make([]byte, 1)) // read a single byte
-	// <-time.After(5 * time.Second)
 	task.play <- struct{}{}
 }
 
@@ -236,10 +250,9 @@ func (task *Task) savePipe() {
 
 // SaveTile 保存瓦片
 func (task *Task) saveTile(tile Tile) error {
-	// defer task.wg.Done()
 	err := saveToFiles(tile, task)
 	if err != nil {
-		log.Errorf("create %v tile file error ~ %s", tile.T, err)
+		sysLog.Errorf("create %v tile file error ~ %s", tile.T, err)
 	}
 	return nil
 }
@@ -247,16 +260,16 @@ func (task *Task) saveTile(tile Tile) error {
 // tileFetcher 瓦片加载器
 func (task *Task) tileFetcher(mt maptile.Tile, url string) {
 	start := time.Now()
-	defer task.tileWG.Done() //结束该瓦片请求
+	defer task.tileWG.Done()
 	defer func() {
-		<-task.workers //workers完成并清退
+		<-task.workers
 	}()
 
 	// 断点续传：跳过已下载的瓦片
 	if task.outformat != "mbtiles" {
 		path := getTileFilePath(task, mt)
 		if _, err := os.Stat(path); err == nil {
-			log.Debugf("skip existing tile (z:%d, x:%d, y:%d)", mt.Z, mt.X, mt.Y)
+			sysLog.Debugf("skip existing tile (z:%d, x:%d, y:%d)", mt.Z, mt.X, mt.Y)
 			return
 		}
 	} else {
@@ -266,7 +279,7 @@ func (task *Task) tileFetcher(mt maptile.Tile, url string) {
 		err := task.db.QueryRow("SELECT COUNT(*) FROM tiles WHERE zoom_level=? AND tile_column=? AND tile_row=?",
 			mt.Z, mt.X, flippedY).Scan(&count)
 		if err == nil && count > 0 {
-			log.Debugf("skip existing tile (z:%d, x:%d, y:%d)", mt.Z, mt.X, mt.Y)
+			sysLog.Debugf("skip existing tile (z:%d, x:%d, y:%d)", mt.Z, mt.X, mt.Y)
 			return
 		}
 	}
@@ -277,13 +290,34 @@ func (task *Task) tileFetcher(mt maptile.Tile, url string) {
 		maxY := int(math.Pow(2, float64(t.Z))) - 1
 		url = strings.Replace(url, "{-y}", strconv.Itoa(maxY-int(t.Y)), -1)
 		url = strings.Replace(url, "{z}", strconv.Itoa(int(t.Z)), -1)
+		// 子域名范围: {1-4} 随机数字, {a-c} 随机字母
+		numRangeRe := regexp.MustCompile(`\{(\d+)-(\d+)\}`)
+		url = numRangeRe.ReplaceAllStringFunc(url, func(m string) string {
+			parts := numRangeRe.FindStringSubmatch(m)
+			if len(parts) == 3 {
+				lo, _ := strconv.Atoi(parts[1])
+				hi, _ := strconv.Atoi(parts[2])
+				return strconv.Itoa(lo + rand.IntN(hi-lo+1))
+			}
+			return m
+		})
+		letterRangeRe := regexp.MustCompile(`\{([a-z])-([a-z])\}`)
+		url = letterRangeRe.ReplaceAllStringFunc(url, func(m string) string {
+			parts := letterRangeRe.FindStringSubmatch(m)
+			if len(parts) == 3 {
+				lo := int(parts[1][0])
+				hi := int(parts[2][0])
+				return string(rune(lo + rand.IntN(hi-lo+1)))
+			}
+			return m
+		})
 		return url
 	}
 	tileURL := prep(mt, url)
 
 	req, err := http.NewRequest("GET", tileURL, nil)
 	if err != nil {
-		log.Errorf("create request error: %s", err)
+		sysLog.Errorf("create request error: %s", err)
 		return
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -296,14 +330,14 @@ func (task *Task) tileFetcher(mt maptile.Tile, url string) {
 	var body []byte
 	var statusCode int
 	minBodySize := 256
-	if task.TileMap.Format == PBF {
+	if task.TileMap.Format == PBF || task.TileMap.Format == PNG {
 		minBodySize = 1
 	}
 
 	for attempt := 0; attempt < 3; attempt++ {
 		resp, err := httpClient.Do(req)
 		if err != nil {
-			log.Warnf("fetch %s attempt %d error: %s", tileURL, attempt+1, err)
+			sysLog.Warnf("fetch %s attempt %d error: %s", tileURL, attempt+1, err)
 			time.Sleep(time.Duration(1<<uint(attempt)) * time.Second)
 			continue
 		}
@@ -312,12 +346,12 @@ func (task *Task) tileFetcher(mt maptile.Tile, url string) {
 			body, err = io.ReadAll(resp.Body)
 			resp.Body.Close()
 			if err != nil {
-				log.Warnf("read %s attempt %d error: %s", tileURL, attempt+1, err)
+				sysLog.Warnf("read %s attempt %d error: %s", tileURL, attempt+1, err)
 				time.Sleep(time.Duration(1<<uint(attempt)) * time.Second)
 				continue
 			}
 			if len(body) < minBodySize {
-				log.Warnf("tile %v too small (%d bytes), retry", mt, len(body))
+				sysLog.Warnf("tile %v too small (%d bytes), retry", mt, len(body))
 				time.Sleep(time.Duration(1<<uint(attempt)) * time.Second)
 				continue
 			}
@@ -325,7 +359,7 @@ func (task *Task) tileFetcher(mt maptile.Tile, url string) {
 		}
 		resp.Body.Close()
 		if resp.StatusCode >= 500 || resp.StatusCode == 429 {
-			log.Warnf("fetch %s status %d attempt %d", tileURL, resp.StatusCode, attempt+1)
+			sysLog.Warnf("fetch %s status %d attempt %d", tileURL, resp.StatusCode, attempt+1)
 			time.Sleep(time.Duration(1<<uint(attempt)) * time.Second)
 			continue
 		}
@@ -333,14 +367,17 @@ func (task *Task) tileFetcher(mt maptile.Tile, url string) {
 	}
 	if statusCode != 200 || len(body) < minBodySize {
 		if statusCode == 200 && len(body) < minBodySize {
-			log.Errorf("tile %v too small after retries (%d bytes)", mt, len(body))
+			sysLog.Errorf("tile %v too small after retries (%d bytes)", mt, len(body))
+			countError()
 		} else {
-			log.Errorf("fetch %v tile error, status code: %d ~", mt, statusCode)
+			sysLog.Errorf("fetch %v tile error, status code: %d ~", mt, statusCode)
+			countError()
 		}
 		return
 	}
 	if len(body) == 0 {
-		log.Warnf("nil tile %v ~", mt)
+		sysLog.Warnf("nil tile %v ~", mt)
+		countError()
 		return
 	}
 	// tiledata
@@ -354,10 +391,10 @@ func (task *Task) tileFetcher(mt maptile.Tile, url string) {
 		zw := gzip.NewWriter(&buf)
 		_, err = zw.Write(body)
 		if err != nil {
-			log.Fatal(err)
+			sysLog.Fatal(err)
 		}
 		if err := zw.Close(); err != nil {
-			log.Fatal(err)
+			sysLog.Fatal(err)
 		}
 		td.C = buf.Bytes()
 	}
@@ -370,57 +407,51 @@ func (task *Task) tileFetcher(mt maptile.Tile, url string) {
 	}
 
 	cost := time.Since(start).Milliseconds()
-	log.Infof("tile(z:%d, x:%d, y:%d), %dms , %.2f kb, %s ...\n", mt.Z, mt.X, mt.Y, cost, float32(len(body))/1024.0, tileURL)
+	progLog.Infof("tile(z:%d, x:%d, y:%d), %dms , %.2f kb, %s ...\n", mt.Z, mt.X, mt.Y, cost, float32(len(body))/1024.0, tileURL)
 }
 
 // DownloadZoom 下载指定层级
 func (task *Task) downloadLayer(layer Layer) {
 	bar := pb.New64(layer.Count).Prefix(fmt.Sprintf("Zoom %d : ", layer.Zoom)).Postfix("\n")
-	// bar.SetRefreshRate(time.Second)
 	bar.Start()
-	// bar.SetMaxWidth(300)
 
 	var tilelist = make(chan maptile.Tile, task.bufSize)
 
 	go tilecover.CollectionChannel(layer.Collection, maptile.Zoom(layer.Zoom), tilelist)
 
 	for tile := range tilelist {
-		// log.Infof(`fetching tile %v ~`, tile)
 		select {
 		case task.workers <- tile:
-			//设置请求发送间隔时间
 			bar.Increment()
 			task.Bar.Increment()
+			atomic.AddInt64(&task.Current, 1)
 			task.tileWG.Add(1)
 			go task.tileFetcher(tile, layer.URL)
 		case <-task.abort:
-			log.Infof("Task %s got canceled.", task.ID)
+			sysLog.Infof("Task %s got canceled.", task.ID)
 			close(tilelist)
 		case <-task.pause:
-			log.Infof("Task %s suspended.", task.ID)
+			sysLog.Infof("Task %s suspended.", task.ID)
 			select {
 			case <-task.play:
-				log.Infof("Task %s go on.", task.ID)
+				sysLog.Infof("Task %s go on.", task.ID)
 			case <-task.abort:
-				log.Infof("Task %s got canceled.", task.ID)
+				sysLog.Infof("Task %s got canceled.", task.ID)
 				close(tilelist)
 			}
 		}
 	}
-	//等待该层结束
 	bar.FinishPrint(fmt.Sprintf("Zoom %d dispatch finished ~", layer.Zoom))
 }
 
 // Download 开启下载任务
 func (task *Task) Download() {
-	//g orb.Geometry, minz int, maxz int
+	downloadStart := time.Now()
 	task.Bar = pb.New64(task.Total).Prefix("Task : ").Postfix("\n")
-	// task.Bar.SetRefreshRate(10 * time.Second)
-	// task.Bar.Format("<.- >")
 	task.Bar.Start()
 	if task.outformat == "mbtiles" {
 		if err := task.SetupMBTileTables(); err != nil {
-			log.Fatalf("init mbtiles error: %s", err)
+			sysLog.Fatalf("init mbtiles error: %s", err)
 		}
 	} else {
 		if task.File == "" {
@@ -430,6 +461,41 @@ func (task *Task) Download() {
 		os.MkdirAll(task.File, os.ModePerm)
 	}
 	go task.savePipe()
+
+	// 定期进度日志，30s 一条，方便后台运行时查看
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		start := time.Now()
+		prevCurrent := int64(0)
+		prevTime := start
+		for {
+			select {
+			case <-ticker.C:
+				now := time.Now()
+				current := atomic.LoadInt64(&task.Current)
+				elapsed := now.Sub(start).Truncate(time.Second)
+				pct := float64(current) / float64(task.Total) * 100
+				var eta string
+				interval := now.Sub(prevTime).Seconds()
+				delta := current - prevCurrent
+				if delta > 0 && interval > 0 {
+					rate := float64(delta) / interval
+					remaining := time.Duration(float64(task.Total-current)/rate) * time.Second
+					eta = remaining.Truncate(time.Second).String()
+				} else {
+					eta = "-"
+				}
+				sysLog.Infof("Progress: %d / %d (%.2f%%), elapsed %s, ETA %s", current, task.Total, pct, elapsed, eta)
+				prevCurrent = current
+				prevTime = now
+			case <-done:
+				return
+			}
+		}
+	}()
+
 	var dWg sync.WaitGroup
 	for _, layer := range task.Layers {
 		dWg.Add(1)
@@ -440,9 +506,13 @@ func (task *Task) Download() {
 	}
 	dWg.Wait()
 	task.tileWG.Wait()
+	close(done)
 	close(task.savingpipe)
 	if task.db != nil {
+		task.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 		task.db.Close()
 	}
 	task.Bar.FinishPrint(fmt.Sprintf("Task %s finished ~", task.ID))
+	elapsed := time.Since(downloadStart)
+	notifyComplete(task.Current, task.Total, elapsed)
 }

@@ -14,6 +14,6 @@ if [ -f "$PIDFILE" ]; then
     rm -f "$PIDFILE"
 fi
 
-nohup ./"$APP" -c "$CONF" >> app.log 2>&1 &
+nohup ./"$APP" -c "$CONF" > /dev/null 2>&1 &
 echo $! > "$PIDFILE"
 echo "tileclaw started (pid $!)"

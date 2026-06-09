@@ -1,36 +1,42 @@
 [app]
-	version = "v 0.1.0"
-	title = "MapCloud Tiler"
+    version = "v 0.1.0"
+    title = "MapCloud Tiler"
 [output]
-	#can be mbtiles/file
-	format ="mbtiles"
-	#the output dir
-	directory ="output"
+    #can be mbtiles/file
+    format = "mbtiles"
+    #the output dir
+    directory = "output"
 [task]
-	#number of fetchers
-	workers = 2
-	#number of savers
-	savepipe = 1
-	#min request interval, a speed limit, unit millisecond
-	timedelay = 100
+    #number of fetchers
+    workers = 28
+    #number of savers
+    savepipe = 200
+    #min request interval, a speed limit, unit millisecond
+    timedelay = 10
 
 [tm]
-	#name for mbtiles
-	name = "高德卫星图"
-	#max and min level for mbtiles
-	min = 0
-	max = 15
-	#can be pbf/png/jpg
-	format = "jpg"
-	#can be xyz/tm
-	schema = "xyz"
-	#the vector tiles metadata tilejson
-	# json = ""
-	#url is the schema url of tiles
+    #name for mbtiles
+    name = "Gaode_street_map"
+    #max and min level for mbtiles
+    min = 0
+    max = 16
+    #can be pbf/png/jpg
+    format = "png"
+    #can be xyz/tm
+    schema = "xyz"
 
-    url = "http://webst01.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}"
+#    url = "http://webst0{1-4}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}"
+    url = "http://webrd0{1-4}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}"
+    # 地图中心点 (经度, 纬度). 高德/天地图用 GCJ-02, Google/OSM 用 WGS-84
+    center_lon = 116.404
+    center_lat = 39.915
 #lrs can set diff boundaries for diff levels
-  [[lrs]]
-  	min = 0
-  	max = 15
-  	geojson = "./geojson/china.geojson"
+[[lrs]]
+    min = 0
+    max = 6
+    geojson = "./geojson/global.geojson"
+
+[[lrs]]
+    min = 7
+    max = 16
+    geojson = "./geojson/china.geojson"
