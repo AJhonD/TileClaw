@@ -31,7 +31,7 @@ go build -trimpath -ldflags="-s -w" -o tileclaw .
 
 ### Configuration
 
-Edit `conf.toml`:
+Edit `conf/conf.toml`:
 
 ```toml
 [task]
@@ -59,11 +59,76 @@ Edit `conf.toml`:
 ### Run
 
 ```bash
-./tileclaw -c conf.toml
+./tileclaw -c conf/conf.toml
 
 # Background
-nohup ./tileclaw -c conf.toml > tileclaw.log 2>&1 &
+nohup ./tileclaw -c conf/conf.toml > /dev/null 2>&1 &
 ```
+
+## CLI Options
+
+| Option | Description |
+|--------|-------------|
+| `-c` | Config file path, default `conf/conf.toml` |
+| `-test-mail` | Send a test email to verify mail notification config |
+| `-convert-shp` | Convert a .shp/.zip file to GeoJSON and exit |
+| `-convert-out` | Output path for the converted GeoJSON file |
+| `--force-polygon` | Force PolyLine to Polygon conversion (auto-closes open rings) |
+
+### SHP to GeoJSON Conversion
+
+Supports `.shp` and `.zip` (containing .shp) input. Automatically detects geometry types and outputs GeoJSON.
+
+```bash
+# Basic conversion
+./tileclaw -convert-shp boundary.zip -convert-out ./geojson/boundary.geojson
+
+# Force line-to-polygon conversion (useful for boundary line data)
+./tileclaw -convert-shp boundary.zip -convert-out ./geojson/boundary.geojson --force-polygon
+```
+
+The tool prints geometry type summary during conversion, e.g. `Shapefile geometry: PolyLine x10`. Closed rings are automatically detected and converted to Polygon. Use `--force-polygon` to force polygon output for open lines by auto-closing them.
+
+### Multi-URL Download
+
+Each `[[lrs]]` block can specify its own `url`. If omitted, the global `[tm].url` is used. Different zoom ranges or regions can fetch from different tile sources.
+
+```toml
+# Global default URL
+[tm]
+    url = "http://webrd0{1-4}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}"
+
+# Low zoom levels: global boundary, default URL
+[[lrs]]
+    min = 0
+    max = 6
+    geojson = "./geojson/global.geojson"
+
+# High zoom levels: China region, different tile source
+[[lrs]]
+    min = 7
+    max = 16
+    geojson = "./geojson/china.geojson"
+    url = "http://mt0.google.com/vt/lyrs=y&x={x}&y={y}&z={z}"
+
+# Same zoom level, different regions with different URLs
+[[lrs]]
+    min = 7
+    max = 16
+    geojson = "./geojson/china_ten_dash_line.geojson"
+    url = "http://webst0{1-4}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}"
+```
+
+> URL supports `{1-4}` numeric range and `{a-c}` letter range for subdomain rotation, e.g. `webst0{1-4}` randomly picks from `webst01`/`webst02`/`webst03`/`webst04`.
+
+## Boundary Data Sources
+
+Download areas are controlled by the GeoJSON boundary files configured in `conf/conf.toml`. You can obtain administrative boundary data from:
+
+- [shengshixian.com](https://www.shengshixian.com/)
+- [Ruiduobao Map Data](https://map.ruiduobao.com/)
+
+Province-level or national boundary data is usually enough for tile downloading. County, township, and village-level datasets can be very large and are usually unnecessary for nationwide downloads. For public map products, use properly licensed and compliant boundary data.
 
 ## Tile URL Reference
 
@@ -190,6 +255,10 @@ Key improvements over the original:
 - Resumable downloads with deterministic output paths
 - Structured logging with panic recovery
 - Pre-built cross-platform packaging via Taskfile
+
+## Disclaimer
+
+This project is intended only for learning, research, and personal technical verification. Do not use it in ways that violate map service terms, data licenses, laws, regulations, or map review requirements. Users are responsible for verifying the authorization and compliance of tile services, boundary datasets, administrative division data, and generated outputs. Any risk or liability arising from use of this project is borne by the user.
 
 ## License
 

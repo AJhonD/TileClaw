@@ -1,6 +1,6 @@
 [app]
     version = "v 0.1.0"
-    title = "MapCloud Tiler"
+    title = "TilerClaw"
 [output]
     #can be mbtiles/file
     format = "mbtiles"
@@ -40,3 +40,8 @@
     min = 7
     max = 16
     geojson = "./geojson/china.geojson"
+
+[[lrs]]
+    min = 7
+    max = 16
+    geojson = "./geojson/china_ten_dash_line.geojson"

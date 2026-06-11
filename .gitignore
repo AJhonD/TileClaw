@@ -1,6 +1,9 @@
 build
+.gocache
+.tmp
 .idea
 output
+logs
 *.log
-mail.toml
+conf/mail.toml
 *密钥*.txt

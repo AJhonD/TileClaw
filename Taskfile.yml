@@ -6,25 +6,26 @@ vars:
 
 tasks:
   default:
-    desc: 编译 Linux amd64 + 打包
+    desc: Build and package Linux amd64
     cmds:
       - task: package:linux
 
-  # ========== 编译 ==========
   build:
-    desc: 编译指定平台 (内部用)
+    desc: Build target platform
     cmds:
+      - rm -rf {{.BUILD_DIR}}/{{.GOOS}}-{{.GOARCH}}
       - mkdir -p {{.BUILD_DIR}}/{{.GOOS}}-{{.GOARCH}}
       - go build -trimpath -ldflags="-s -w" -o {{.BUILD_DIR}}/{{.GOOS}}-{{.GOARCH}}/{{.BIN}} .
     env:
       GOOS: "{{.GOOS}}"
       GOARCH: "{{.GOARCH}}"
       CGO_ENABLED: "0"
+      GOCACHE: "{{.TASKFILE_DIR}}/.gocache"
     vars:
       BIN: '{{if eq .GOOS "windows"}}tileclaw.exe{{else}}tileclaw{{end}}'
 
   build:linux:
-    desc: 编译 Linux amd64
+    desc: Build Linux amd64
     cmds:
       - task: build
         vars:
@@ -32,7 +33,7 @@ tasks:
           GOARCH: amd64
 
   build:linux-arm:
-    desc: 编译 Linux arm64
+    desc: Build Linux arm64
     cmds:
       - task: build
         vars:
@@ -40,7 +41,7 @@ tasks:
           GOARCH: arm64
 
   build:windows:
-    desc: 编译 Windows amd64
+    desc: Build Windows amd64
     cmds:
       - task: build
         vars:
@@ -48,7 +49,7 @@ tasks:
           GOARCH: amd64
 
   build:mac:
-    desc: 编译 macOS amd64
+    desc: Build macOS amd64
     cmds:
       - task: build
         vars:
@@ -56,71 +57,74 @@ tasks:
           GOARCH: amd64
 
   build:mac-arm:
-    desc: 编译 macOS arm64
+    desc: Build macOS arm64
     cmds:
       - task: build
         vars:
           GOOS: darwin
           GOARCH: arm64
 
-  # ========== 打包 ==========
   package:linux:
-    desc: 编译 + 打包 Linux amd64 → build/linux-amd64/
+    desc: Build and package Linux amd64
     deps: [build:linux]
     cmds:
-      - cp conf.toml mail.toml {{.BUILD_DIR}}/linux-amd64/
+      - mkdir -p {{.BUILD_DIR}}/linux-amd64/conf
+      - cp conf/conf.toml conf/mail.example.toml {{.BUILD_DIR}}/linux-amd64/conf/
       - cp -r geojson {{.BUILD_DIR}}/linux-amd64/
-      - cp start.sh stop.sh {{.BUILD_DIR}}/linux-amd64/
+      - cp scripts/start.sh scripts/stop.sh {{.BUILD_DIR}}/linux-amd64/
       - chmod +x {{.BUILD_DIR}}/linux-amd64/tileclaw {{.BUILD_DIR}}/linux-amd64/start.sh {{.BUILD_DIR}}/linux-amd64/stop.sh
-      - mkdir -p {{.BUILD_DIR}}/linux-amd64/output
+      - 'echo "package output: {{.BUILD_DIR}}/linux-amd64"'
 
   package:linux-arm:
-    desc: 编译 + 打包 Linux arm64 → build/linux-arm64/
+    desc: Build and package Linux arm64
     deps: [build:linux-arm]
     cmds:
-      - cp conf.toml mail.toml {{.BUILD_DIR}}/linux-arm64/
+      - mkdir -p {{.BUILD_DIR}}/linux-arm64/conf
+      - cp conf/conf.toml conf/mail.example.toml {{.BUILD_DIR}}/linux-arm64/conf/
       - cp -r geojson {{.BUILD_DIR}}/linux-arm64/
-      - cp start.sh stop.sh {{.BUILD_DIR}}/linux-arm64/
+      - cp scripts/start.sh scripts/stop.sh {{.BUILD_DIR}}/linux-arm64/
       - chmod +x {{.BUILD_DIR}}/linux-arm64/tileclaw {{.BUILD_DIR}}/linux-arm64/start.sh {{.BUILD_DIR}}/linux-arm64/stop.sh
-      - mkdir -p {{.BUILD_DIR}}/linux-arm64/output
+      - 'echo "package output: {{.BUILD_DIR}}/linux-arm64"'
 
   package:windows:
-    desc: 编译 + 打包 Windows amd64 → build/windows-amd64/
+    desc: Build and package Windows amd64
     deps: [build:windows]
     cmds:
-      - cp conf.toml mail.toml {{.BUILD_DIR}}/windows-amd64/
+      - mkdir -p {{.BUILD_DIR}}/windows-amd64/conf
+      - cp conf/conf.toml conf/mail.example.toml {{.BUILD_DIR}}/windows-amd64/conf/
       - cp -r geojson {{.BUILD_DIR}}/windows-amd64/
-      - cp start.bat stop.bat {{.BUILD_DIR}}/windows-amd64/
-      - mkdir {{.BUILD_DIR}}/windows-amd64/output
+      - cp scripts/start.bat scripts/stop.bat {{.BUILD_DIR}}/windows-amd64/
+      - 'echo "package output: {{.BUILD_DIR}}/windows-amd64"'
 
   package:mac:
-    desc: 编译 + 打包 macOS amd64 → build/darwin-amd64/
+    desc: Build and package macOS amd64
     deps: [build:mac]
     cmds:
-      - cp conf.toml mail.toml {{.BUILD_DIR}}/darwin-amd64/
+      - mkdir -p {{.BUILD_DIR}}/darwin-amd64/conf
+      - cp conf/conf.toml conf/mail.example.toml {{.BUILD_DIR}}/darwin-amd64/conf/
       - cp -r geojson {{.BUILD_DIR}}/darwin-amd64/
-      - cp start.sh stop.sh {{.BUILD_DIR}}/darwin-amd64/
+      - cp scripts/start.sh scripts/stop.sh {{.BUILD_DIR}}/darwin-amd64/
       - chmod +x {{.BUILD_DIR}}/darwin-amd64/tileclaw {{.BUILD_DIR}}/darwin-amd64/start.sh {{.BUILD_DIR}}/darwin-amd64/stop.sh
-      - mkdir -p {{.BUILD_DIR}}/darwin-amd64/output
+      - 'echo "package output: {{.BUILD_DIR}}/darwin-amd64"'
 
   package:mac-arm:
-    desc: 编译 + 打包 macOS arm64 → build/darwin-arm64/
+    desc: Build and package macOS arm64
     deps: [build:mac-arm]
     cmds:
-      - cp conf.toml mail.toml {{.BUILD_DIR}}/darwin-arm64/
+      - mkdir -p {{.BUILD_DIR}}/darwin-arm64/conf
+      - cp conf/conf.toml conf/mail.example.toml {{.BUILD_DIR}}/darwin-arm64/conf/
       - cp -r geojson {{.BUILD_DIR}}/darwin-arm64/
-      - cp start.sh stop.sh {{.BUILD_DIR}}/darwin-arm64/
+      - cp scripts/start.sh scripts/stop.sh {{.BUILD_DIR}}/darwin-arm64/
       - chmod +x {{.BUILD_DIR}}/darwin-arm64/tileclaw {{.BUILD_DIR}}/darwin-arm64/start.sh {{.BUILD_DIR}}/darwin-arm64/stop.sh
-      - mkdir -p {{.BUILD_DIR}}/darwin-arm64/output
+      - 'echo "package output: {{.BUILD_DIR}}/darwin-arm64"'
 
-  # ========== 其他 ==========
   clean:
-    desc: 清理编译产物
+    desc: Clean build artifacts
     cmds:
       - rm -rf {{.BUILD_DIR}}
 
   run:
-    desc: 本地编译并运行
+    desc: Build and run locally
     deps: [build:windows]
     cmds:
-      - ./{{.BUILD_DIR}}/windows-amd64/tileclaw.exe -c conf.toml
+      - ./{{.BUILD_DIR}}/windows-amd64/tileclaw.exe -c conf/conf.toml

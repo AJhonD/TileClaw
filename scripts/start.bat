@@ -1,6 +1,6 @@
 @echo off
 set APP=tileclaw.exe
-set CONF=conf.toml
+if "%CONF%"=="" set CONF=conf\conf.toml
 
 tasklist /FI "IMAGENAME eq %APP%" 2>NUL | find /I "%APP%" >NUL 2>&1
 if %ERRORLEVEL%==0 (

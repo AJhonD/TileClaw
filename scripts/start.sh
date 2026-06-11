@@ -2,7 +2,7 @@
 set -e
 
 APP="tileclaw"
-CONF="${CONF:-conf.toml}"
+CONF="${CONF:-conf/conf.toml}"
 PIDFILE="${APP}.pid"
 
 if [ -f "$PIDFILE" ]; then
@@ -13,6 +13,8 @@ if [ -f "$PIDFILE" ]; then
     fi
     rm -f "$PIDFILE"
 fi
+
+chmod +x "$APP"
 
 nohup ./"$APP" -c "$CONF" > /dev/null 2>&1 &
 echo $! > "$PIDFILE"

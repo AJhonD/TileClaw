@@ -32,7 +32,7 @@ go build -trimpath -ldflags="-s -w" -o tileclaw .
 
 ### 配置
 
-编辑 `conf.toml`：
+编辑 `conf/conf.toml`：
 
 ```toml
 [task]
@@ -60,11 +60,76 @@ go build -trimpath -ldflags="-s -w" -o tileclaw .
 ### 运行
 
 ```bash
-./tileclaw -c conf.toml
+./tileclaw -c conf/conf.toml
 
 # 后台运行
-nohup ./tileclaw -c conf.toml > tileclaw.log 2>&1 &
+nohup ./tileclaw -c conf/conf.toml > /dev/null 2>&1 &
 ```
+
+## 命令行参数
+
+| 参数 | 说明 |
+|------|------|
+| `-c` | 指定配置文件，默认 `conf/conf.toml` |
+| `-test-mail` | 发送一封测试邮件，用于验证邮件通知配置 |
+| `-convert-shp` | 转换 SHP/ZIP 为 GeoJSON 并退出 |
+| `-convert-out` | 指定转换后的 GeoJSON 输出路径 |
+| `--force-polygon` | 配合 `-convert-shp`，强制 PolyLine 转 Polygon（自动补闭合） |
+
+### SHP 转 GeoJSON
+
+支持 `.shp` 和 `.zip`（包含 .shp）格式，自动识别几何类型并输出 GeoJSON。
+
+```bash
+# 基本转换
+./tileclaw -convert-shp boundary.zip -convert-out ./geojson/boundary.geojson
+
+# 强制线转面（适用于边界线数据）
+./tileclaw -convert-shp boundary.zip -convert-out ./geojson/boundary.geojson --force-polygon
+```
+
+转换时会打印几何类型统计，如 `Shapefile geometry: PolyLine x10`。工具会自动检测闭合环并转为 Polygon；如果线条未闭合，可用 `--force-polygon` 强制转为面（自动补闭合）。
+
+### 多 URL 下载
+
+每个 `[[lrs]]` 块可以指定独立的 `url`，未指定则使用全局 `[tm].url`。不同层级范围或不同区域可使用不同的瓦片源。
+
+```toml
+# 全局默认 URL
+[tm]
+    url = "http://webrd0{1-4}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}"
+
+# 低层级用全球边界 + 默认 URL
+[[lrs]]
+    min = 0
+    max = 6
+    geojson = "./geojson/global.geojson"
+
+# 高层级中国区域用另一个瓦片源
+[[lrs]]
+    min = 7
+    max = 16
+    geojson = "./geojson/china.geojson"
+    url = "http://mt0.google.com/vt/lyrs=y&x={x}&y={y}&z={z}"
+
+# 同一层级不同区域也可以用不同 URL
+[[lrs]]
+    min = 7
+    max = 16
+    geojson = "./geojson/china_ten_dash_line.geojson"
+    url = "http://webst0{1-4}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}"
+```
+
+> URL 支持 `{1-4}` 数字范围和 `{a-c}` 字母范围实现子域名轮询，如 `webst0{1-4}` → `webst01`/`webst02`/`webst03`/`webst04` 随机选取。
+
+## 边界数据来源
+
+下载范围由配置中的 GeoJSON 边界文件决定。可以从以下网站获取省、市、县等行政区划边界数据，并按需转换为 GeoJSON：
+
+- [省市县边界数据](https://www.shengshixian.com/)
+- [锐多宝地图数据下载](https://map.ruiduobao.com/)
+
+建议优先使用省级或全国边界数据。县级、乡镇级、村级数据文件较大，通常不适合作为全国瓦片下载范围。公开发布地图成果时，请使用合规、授权、符合审图要求的数据源。
 
 ## 地图 URL 参考
 
@@ -191,6 +256,10 @@ nohup ./tileclaw -c conf.toml > tileclaw.log 2>&1 &
 - 断点续传，异常退出不丢失进度
 - 确定性输出路径，重启可继续
 - 完善的日志输出与 panic 恢复
+
+## 免责声明
+
+本项目仅用于学习、研究和个人技术验证。请勿将本工具用于违反地图服务条款、数据授权协议、法律法规或审图要求的用途。使用者应自行确认瓦片服务、边界数据、行政区划数据及生成成果的授权和合规性。因使用本项目造成的任何风险或责任，由使用者自行承担。
 
 ## License
 
