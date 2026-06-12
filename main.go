@@ -18,6 +18,8 @@ var (
 	convertShpInput  string
 	convertShpOut    string
 	convertForcePoly bool
+	convertMerge     bool
+	convertSimplify  float64
 )
 
 func main() {
@@ -38,9 +40,11 @@ func init() {
 	})
 	flag.StringVar(&cf, "c", config.DefaultConfigFile, "set config `file`")
 	flag.BoolVar(&testMail, "test-mail", false, "send a test email and exit")
-	flag.StringVar(&convertShpInput, "convert-shp", "", "convert .shp or .zip containing shapefile to GeoJSON and exit")
+	flag.StringVar(&convertShpInput, "convert-shp", "", "convert .shp/.zip/.geojson to GeoJSON and exit")
 	flag.StringVar(&convertShpOut, "convert-out", "", "set converted GeoJSON output `file`")
 	flag.BoolVar(&convertForcePoly, "force-polygon", false, "force PolyLine to Polygon (auto-close open rings)")
+	flag.BoolVar(&convertMerge, "merge", false, "merge all features into one MultiPolygon")
+	flag.Float64Var(&convertSimplify, "simplify", 0, "Douglas-Peucker simplify tolerance in degrees (e.g. 0.01)")
 	flag.Usage = func() {
 		_, _ = fmt.Fprintf(os.Stderr, `TileClaw v0.2.0 Usage: tileclaw [-h] [-c filename]`)
 		flag.PrintDefaults()
@@ -68,7 +72,7 @@ func handleTestMail() {
 // convert shapefile
 func handleConvertShp() {
 	if convertShpInput != "" {
-		output, err := converter.ConvertShapefileToGeoJSON(convertShpInput, convertShpOut, convertForcePoly)
+		output, err := converter.ConvertShapefileToGeoJSON(convertShpInput, convertShpOut, convertForcePoly, convertMerge, convertSimplify)
 		if err != nil {
 			log.SysLog.Fatalf("convert shapefile failed: %s", err)
 		}

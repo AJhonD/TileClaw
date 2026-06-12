@@ -30,18 +30,38 @@ type geometry struct {
 	Coordinates interface{} `json:"coordinates"`
 }
 
-func ConvertShapefileToGeoJSON(inputPath, outputPath string, forcePolygon bool) (string, error) {
-	shp, name, err := readShapefile(inputPath)
+func ConvertShapefileToGeoJSON(inputPath, outputPath string, forcePolygon, merge bool, simplifyTolerance float64) (string, error) {
+	ext := strings.ToLower(filepath.Ext(inputPath))
+
+	var features []feature
+	var name string
+	var err error
+
+	if ext == ".geojson" || ext == ".json" {
+		name = filepath.Base(inputPath)
+		features, err = readGeoJSON(inputPath)
+	} else {
+		var raw []byte
+		raw, name, err = readShapefile(inputPath)
+		if err == nil {
+			features, err = parseShapefile(raw, forcePolygon)
+		}
+	}
 	if err != nil {
 		return "", err
 	}
+
 	if outputPath == "" {
 		outputPath = defaultOutputPath(name)
 	}
 
-	features, err := parseShapefile(shp, forcePolygon)
-	if err != nil {
-		return "", err
+	if merge {
+		features = mergeFeatures(features)
+		log.SysLog.Infof("merged %d features into 1 MultiPolygon", len(features))
+	}
+
+	if simplifyTolerance > 0 {
+		features = simplifyFeatures(features, simplifyTolerance)
 	}
 
 	data := featureCollection{
@@ -61,6 +81,253 @@ func ConvertShapefileToGeoJSON(inputPath, outputPath string, forcePolygon bool) 
 		return "", err
 	}
 	return outputPath, nil
+}
+
+func readGeoJSON(path string) ([]feature, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read geojson: %w", err)
+	}
+	var fc featureCollection
+	if err := json.Unmarshal(data, &fc); err != nil {
+		return nil, fmt.Errorf("parse geojson: %w", err)
+	}
+	log.SysLog.Infof("Loaded %d features from GeoJSON", len(fc.Features))
+	return fc.Features, nil
+}
+
+func mergeFeatures(features []feature) []feature {
+	allRings := make([]interface{}, 0)
+	for _, f := range features {
+		rings := extractPolygonRings(f.Geometry)
+		for _, ring := range rings {
+			allRings = append(allRings, []interface{}{ring})
+		}
+	}
+	if len(allRings) == 0 {
+		return features
+	}
+	return []feature{{
+		Type:       "Feature",
+		Properties: map[string]interface{}{"name": "merged"},
+		Geometry:   geometry{Type: "MultiPolygon", Coordinates: allRings},
+	}}
+}
+
+func extractPolygonRings(g geometry) []interface{} {
+	switch g.Type {
+	case "Polygon":
+		return extractPolygonCoords(g.Coordinates)
+	case "MultiPolygon":
+		var rings []interface{}
+		polygons, ok := g.Coordinates.([]interface{})
+		if !ok {
+			return nil
+		}
+		for _, poly := range polygons {
+			rings = append(rings, extractPolygonCoords(poly)...)
+		}
+		return rings
+	}
+	return nil
+}
+
+func extractPolygonCoords(raw interface{}) []interface{} {
+	rings, ok := raw.([]interface{})
+	if !ok {
+		return nil
+	}
+	result := make([]interface{}, 0)
+	for _, ring := range rings {
+		points, ok := ring.([]interface{})
+		if !ok {
+			continue
+		}
+		coords := make([]interface{}, 0, len(points))
+		for _, pt := range points {
+			ptArr, ok := pt.([]interface{})
+			if !ok || len(ptArr) < 2 {
+				continue
+			}
+			x, _ := toFloat64(ptArr[0])
+			y, _ := toFloat64(ptArr[1])
+			coords = append(coords, []interface{}{x, y})
+		}
+		if len(coords) > 0 {
+			result = append(result, coords)
+		}
+	}
+	return result
+}
+
+func toFloat64(v interface{}) (float64, bool) {
+	switch val := v.(type) {
+	case float64:
+		return val, true
+	case float32:
+		return float64(val), true
+	case int:
+		return float64(val), true
+	case int64:
+		return float64(val), true
+	case json.Number:
+		f, err := val.Float64()
+		return f, err == nil
+	}
+	return 0, false
+}
+
+func simplifyFeatures(features []feature, tolerance float64) []feature {
+	totalBefore, totalAfter := 0, 0
+	for i := range features {
+		features[i].Geometry, totalBefore, totalAfter = simplifyGeometry(features[i].Geometry, tolerance, totalBefore, totalAfter)
+	}
+	log.SysLog.Infof("simplified %d → %d vertices (tolerance=%.6f)", totalBefore, totalAfter, tolerance)
+	return features
+}
+
+func simplifyGeometry(g geometry, tolerance float64, before, after int) (geometry, int, int) {
+	switch g.Type {
+	case "Polygon":
+		rings, ok := g.Coordinates.([]interface{})
+		if !ok {
+			return g, before, after
+		}
+		newRings := make([]interface{}, 0, len(rings))
+		for _, ring := range rings {
+			pts := ringToPoints(ring)
+			before += len(pts)
+			simplified := douglasPeucker(pts, tolerance)
+			after += len(simplified)
+			newRings = append(newRings, pointsToRing(simplified))
+		}
+		g.Coordinates = newRings
+	case "MultiPolygon":
+		polygons, ok := g.Coordinates.([]interface{})
+		if !ok {
+			return g, before, after
+		}
+		newPolygons := make([]interface{}, 0, len(polygons))
+		for _, poly := range polygons {
+			subPolygon, ok := poly.([]interface{})
+			if !ok {
+				continue
+			}
+			newRings := make([]interface{}, 0, len(subPolygon))
+			for _, ring := range subPolygon {
+				pts := ringToPoints(ring)
+				before += len(pts)
+				simplified := douglasPeucker(pts, tolerance)
+				after += len(simplified)
+				newRings = append(newRings, pointsToRing(simplified))
+			}
+			newPolygons = append(newPolygons, newRings)
+		}
+		g.Coordinates = newPolygons
+	case "LineString":
+		pts := ringToPoints(g.Coordinates)
+		before += len(pts)
+		simplified := douglasPeucker(pts, tolerance)
+		after += len(simplified)
+		g.Coordinates = pointsToRing(simplified)
+	case "MultiLineString":
+		lines, ok := g.Coordinates.([]interface{})
+		if !ok {
+			return g, before, after
+		}
+		newLines := make([]interface{}, 0, len(lines))
+		for _, line := range lines {
+			pts := ringToPoints(line)
+			before += len(pts)
+			simplified := douglasPeucker(pts, tolerance)
+			after += len(simplified)
+			newLines = append(newLines, pointsToRing(simplified))
+		}
+		g.Coordinates = newLines
+	}
+	return g, before, after
+}
+
+func ringToPoints(ring interface{}) [][2]float64 {
+	arr, ok := ring.([]interface{})
+	if !ok {
+		return nil
+	}
+	pts := make([][2]float64, 0, len(arr))
+	for _, item := range arr {
+		pt, ok := item.([]interface{})
+		if !ok || len(pt) < 2 {
+			continue
+		}
+		x, _ := toFloat64(pt[0])
+		y, _ := toFloat64(pt[1])
+		pts = append(pts, [2]float64{x, y})
+	}
+	return pts
+}
+
+func pointsToRing(pts [][2]float64) []interface{} {
+	ring := make([]interface{}, len(pts))
+	for i, pt := range pts {
+		ring[i] = []interface{}{pt[0], pt[1]}
+	}
+	return ring
+}
+
+func douglasPeucker(pts [][2]float64, tolerance float64) [][2]float64 {
+	if len(pts) <= 2 {
+		return pts
+	}
+	tol2 := tolerance * tolerance
+
+	maxDist2 := 0.0
+	maxIdx := 0
+	first, last := pts[0], pts[len(pts)-1]
+	dx := last[0] - first[0]
+	dy := last[1] - first[1]
+	baseLen2 := dx*dx + dy*dy
+
+	for i := 1; i < len(pts)-1; i++ {
+		var dist2 float64
+		if baseLen2 < 1e-20 {
+			d1 := pts[i][0] - first[0]
+			d2 := pts[i][1] - first[1]
+			dist2 = d1*d1 + d2*d2
+		} else {
+			t := ((pts[i][0]-first[0])*dx + (pts[i][1]-first[1])*dy) / baseLen2
+			if t < 0 {
+				d1 := pts[i][0] - first[0]
+				d2 := pts[i][1] - first[1]
+				dist2 = d1*d1 + d2*d2
+			} else if t > 1 {
+				d1 := pts[i][0] - last[0]
+				d2 := pts[i][1] - last[1]
+				dist2 = d1*d1 + d2*d2
+			} else {
+				projX := first[0] + t*dx
+				projY := first[1] + t*dy
+				d1 := pts[i][0] - projX
+				d2 := pts[i][1] - projY
+				dist2 = d1*d1 + d2*d2
+			}
+		}
+		if dist2 > maxDist2 {
+			maxDist2 = dist2
+			maxIdx = i
+		}
+	}
+
+	if maxDist2 <= tol2 {
+		return [][2]float64{first, last}
+	}
+
+	left := douglasPeucker(pts[:maxIdx+1], tolerance)
+	right := douglasPeucker(pts[maxIdx:], tolerance)
+
+	result := make([][2]float64, 0, len(left)+len(right)-1)
+	result = append(result, left[:len(left)-1]...)
+	result = append(result, right...)
+	return result
 }
 
 func readShapefile(inputPath string) ([]byte, string, error) {

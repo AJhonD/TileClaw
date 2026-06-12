@@ -71,13 +71,15 @@ nohup ./tileclaw -c conf/conf.toml > /dev/null 2>&1 &
 |--------|-------------|
 | `-c` | Config file path, default `conf/conf.toml` |
 | `-test-mail` | Send a test email to verify mail notification config |
-| `-convert-shp` | Convert a .shp/.zip file to GeoJSON and exit |
+| `-convert-shp` | Convert a .shp/.zip/.geojson file to GeoJSON and exit |
 | `-convert-out` | Output path for the converted GeoJSON file |
 | `--force-polygon` | Force PolyLine to Polygon conversion (auto-closes open rings) |
+| `--merge` | Merge all features into a single MultiPolygon |
+| `--simplify` | Douglas-Peucker simplify tolerance in degrees (e.g. 0.01) |
 
 ### SHP to GeoJSON Conversion
 
-Supports `.shp` and `.zip` (containing .shp) input. Automatically detects geometry types and outputs GeoJSON.
+Supports `.shp`, `.zip` (containing .shp), and `.geojson` input. Automatically detects geometry types and outputs GeoJSON.
 
 ```bash
 # Basic conversion
@@ -85,9 +87,14 @@ Supports `.shp` and `.zip` (containing .shp) input. Automatically detects geomet
 
 # Force line-to-polygon conversion (useful for boundary line data)
 ./tileclaw -convert-shp boundary.zip -convert-out ./geojson/boundary.geojson --force-polygon
+
+# Merge + simplify (province-level data → national boundary)
+./tileclaw -convert-shp provinces.shp -convert-out china.geojson --force-polygon --merge --simplify 0.01
 ```
 
 The tool prints geometry type summary during conversion, e.g. `Shapefile geometry: PolyLine x10`. Closed rings are automatically detected and converted to Polygon. Use `--force-polygon` to force polygon output for open lines by auto-closing them.
+
+`--merge` collects all polygon rings from separate features into a single MultiPolygon. `--simplify` applies Douglas-Peucker simplification to reduce redundant vertices; tolerance is in degrees (0.01 ≈ 1km), drastically reducing file size.
 
 ### Multi-URL Download
 
@@ -127,6 +134,12 @@ Download areas are controlled by the GeoJSON boundary files configured in `conf/
 
 - [shengshixian.com](https://www.shengshixian.com/)
 - [Ruiduobao Map Data](https://map.ruiduobao.com/)
+- [geojson.cn](https://geojson.cn) — China administrative boundaries GeoJSON dataset, includes nine-dash line and Scarborough Shoal baseline data
+
+Online tools for previewing, editing, and validating GeoJSON/SHP boundary data:
+
+- [geojson.io](https://geojson.io) — Online GeoJSON preview & editor with basemaps and drag-and-drop
+- [mapshaper.org](https://mapshaper.org) — Online preview, simplify, merge, format conversion; handles large files well
 
 Province-level or national boundary data is usually enough for tile downloading. County, township, and village-level datasets can be very large and are usually unnecessary for nationwide downloads. For public map products, use properly licensed and compliant boundary data.
 

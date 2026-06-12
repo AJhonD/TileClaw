@@ -72,13 +72,15 @@ nohup ./tileclaw -c conf/conf.toml > /dev/null 2>&1 &
 |------|------|
 | `-c` | 指定配置文件，默认 `conf/conf.toml` |
 | `-test-mail` | 发送一封测试邮件，用于验证邮件通知配置 |
-| `-convert-shp` | 转换 SHP/ZIP 为 GeoJSON 并退出 |
+| `-convert-shp` | 转换 SHP/ZIP/GeoJSON 为 GeoJSON 并退出 |
 | `-convert-out` | 指定转换后的 GeoJSON 输出路径 |
 | `--force-polygon` | 配合 `-convert-shp`，强制 PolyLine 转 Polygon（自动补闭合） |
+| `--merge` | 配合 `-convert-shp`，将所有 feature 合并为一个 MultiPolygon |
+| `--simplify` | 配合 `-convert-shp`，Douglas-Peucker 简化容差（度），如 `0.01` |
 
 ### SHP 转 GeoJSON
 
-支持 `.shp` 和 `.zip`（包含 .shp）格式，自动识别几何类型并输出 GeoJSON。
+支持 `.shp`、`.zip`（包含 .shp）和 `.geojson` 格式，自动识别几何类型并输出 GeoJSON。
 
 ```bash
 # 基本转换
@@ -86,9 +88,14 @@ nohup ./tileclaw -c conf/conf.toml > /dev/null 2>&1 &
 
 # 强制线转面（适用于边界线数据）
 ./tileclaw -convert-shp boundary.zip -convert-out ./geojson/boundary.geojson --force-polygon
+
+# 合并多要素 + 简化顶点（省级数据 → 全国边界）
+./tileclaw -convert-shp 省级.shp -convert-out china.geojson --force-polygon --merge --simplify 0.01
 ```
 
 转换时会打印几何类型统计，如 `Shapefile geometry: PolyLine x10`。工具会自动检测闭合环并转为 Polygon；如果线条未闭合，可用 `--force-polygon` 强制转为面（自动补闭合）。
+
+`--merge` 将所有独立要素（如 34 个省级边界）的多边形环收集到一个 MultiPolygon 中。`--simplify` 使用 Douglas-Peucker 算法简化冗余顶点，容差单位是度（0.01 ≈ 1km），能显著减小文件体积。
 
 ### 多 URL 下载
 
@@ -128,6 +135,12 @@ nohup ./tileclaw -c conf/conf.toml > /dev/null 2>&1 &
 
 - [省市县边界数据](https://www.shengshixian.com/)
 - [锐多宝地图数据下载](https://map.ruiduobao.com/)
+- [geojson.cn](https://geojson.cn) — 中国行政区划 GeoJSON 数据集，含九段线、黄岩岛领海基线等数据
+
+以下在线工具可用于预览、编辑和验证 GeoJSON/SHP 边界数据：
+
+- [geojson.io](https://geojson.io) — 在线 GeoJSON 预览编辑，支持拖拽上传、叠加底图
+- [mapshaper.org](https://mapshaper.org) — 在线预览、简化、合并、格式转换，处理大文件流畅
 
 建议优先使用省级或全国边界数据。县级、乡镇级、村级数据文件较大，通常不适合作为全国瓦片下载范围。公开发布地图成果时，请使用合规、授权、符合审图要求的数据源。
 

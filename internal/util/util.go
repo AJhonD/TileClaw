@@ -88,14 +88,31 @@ func LoadCollection(path string) orb.Collection {
 		log.SysLog.Fatalf("unable to read file: %v", err)
 	}
 
+	var collection orb.Collection
+
 	fc, err := geojson.UnmarshalFeatureCollection(data)
-	if err != nil {
-		log.SysLog.Fatalf("unable to unmarshal feature: %v", err)
+	if err == nil {
+		for _, f := range fc.Features {
+			collection = append(collection, f.Geometry)
+		}
+		collectionCache.Store(path, collection)
+		return collection
 	}
 
-	var collection orb.Collection
-	for _, f := range fc.Features {
-		collection = append(collection, f.Geometry)
+	type geomCollection struct {
+		Type       string            `json:"type"`
+		Geometries []json.RawMessage `json:"geometries"`
+	}
+	var gc geomCollection
+	if err := json.Unmarshal(data, &gc); err != nil {
+		log.SysLog.Fatalf("unable to unmarshal feature: %v", err)
+	}
+	for _, raw := range gc.Geometries {
+		g, err := geojson.UnmarshalGeometry(raw)
+		if err != nil {
+			log.SysLog.Fatalf("unable to unmarshal geometry: %v", err)
+		}
+		collection = append(collection, g.Geometry())
 	}
 
 	collectionCache.Store(path, collection)
